@@ -33,9 +33,14 @@ def save_results(results, path, append=False):
     
     Args:
         results: Dictionary of model results
-        path: Directory path to save results
+        path: Directory path to save results (can be relative or absolute)
         append: If True, append to existing results instead of overwriting
     """
+    # Ensure path is absolute
+    if not os.path.isabs(path):
+        # If relative, resolve relative to current working directory
+        path = os.path.abspath(path)
+    
     os.makedirs(path, exist_ok=True)
     
     # Prepare results for JSON serialization
@@ -54,6 +59,7 @@ def save_results(results, path, append=False):
     
     # Save to file
     results_path = os.path.join(path, 'results_summary.json')
+    results_path = os.path.abspath(results_path)  # Ensure absolute path
     
     # If appending, load existing results first
     if append and os.path.exists(results_path):

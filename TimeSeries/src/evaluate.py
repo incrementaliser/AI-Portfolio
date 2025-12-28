@@ -372,17 +372,46 @@ class TimeSeriesEvaluator:
             try:
                 # Retrain on train + val for final test evaluation
                 combined_train = pd.concat([train_data, val_data])
-                # Prophet and Darts models need Series with datetime index, others can use values
+                
+                # Prophet can only be fit once, so create a new instance for test evaluation
                 if hasattr(model, '__class__'):
                     class_name = model.__class__.__name__
-                    if 'ProphetWrapper' in class_name or 'DartsModelWrapper' in class_name:
-                        model.fit(combined_train)
+                    if 'ProphetWrapper' in class_name:
+                        # Create a new Prophet instance for test evaluation
+                        from models.statistical.statistical import ProphetWrapper
+                        # Get parameters from the original model
+                        if hasattr(model, 'get_params'):
+                            prophet_params = model.get_params()
+                        else:
+                            prophet_params = getattr(model, 'prophet_params', {})
+                        test_model = ProphetWrapper(**prophet_params)
+                        test_model.fit(combined_train)
+                        test_pred = test_model.predict(steps=min(horizon, len(test_data)))
+                    elif 'DartsModelWrapper' in class_name:
+                        # Darts models also need new instance
+                        from models.neural.deep_learning import DartsModelWrapper
+                        # Get parameters from the original model
+                        if hasattr(model, 'model_class') and hasattr(model, 'input_chunk_length'):
+                            test_model = DartsModelWrapper(
+                                model_class=model.model_class,
+                                input_chunk_length=model.input_chunk_length,
+                                output_chunk_length=model.output_chunk_length,
+                                **getattr(model, 'model_params', {})
+                            )
+                            test_model.fit(combined_train)
+                            test_pred = test_model.predict(steps=min(horizon, len(test_data)))
+                        else:
+                            # Fallback: try to refit (may fail)
+                            model.fit(combined_train)
+                            test_pred = model.predict(steps=min(horizon, len(test_data)))
                     else:
+                        # Other models can be refit
                         model.fit(combined_train.values)
+                        test_pred = model.predict(steps=min(horizon, len(test_data)))
                 else:
                     model.fit(combined_train.values)
+                    test_pred = model.predict(steps=min(horizon, len(test_data)))
                 
-                test_pred = model.predict(steps=min(horizon, len(test_data)))
                 test_actual = test_data.values[:len(test_pred)]
                 
                 test_metrics = self.calculate_forecast_metrics(
@@ -399,6 +428,8 @@ class TimeSeriesEvaluator:
                 }
             except Exception as e:
                 print(f"  Warning: Test failed for horizon {horizon}: {e}")
+                import traceback
+                traceback.print_exc()
         
         # Cross-validation (on training data only)
         print("  Performing cross-validation...")

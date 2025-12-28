@@ -323,8 +323,8 @@ EXPERIMENTS = [
     print(f"  Successful: {successful}")
     print(f"  Failed: {failed}")
     
-    # Compare results if multiple successful experiments
-    if successful > 1:
+    # Compare results if any successful experiments
+    if successful > 0:
         print("\n" + "=" * 80)
         print("MODEL COMPARISON")
         print("=" * 80)
@@ -339,7 +339,7 @@ EXPERIMENTS = [
 
 def compare_experiment_results(experiments: List[Dict], results: List[bool]):
     """
-    Compare results from multiple experiments.
+    Compare results from multiple experiments and display in a comprehensive table.
     
     Args:
         experiments: List of experiment configurations
@@ -349,106 +349,193 @@ def compare_experiment_results(experiments: List[Dict], results: List[bool]):
     from pathlib import Path
     
     # Load metrics from saved results
-    metrics_dir = SCRIPT_DIR / "results" / "metrics"
-    metrics_file = metrics_dir / "results_summary.json"
+    # Try multiple possible locations where results might be saved
+    possible_paths = [
+        SCRIPT_DIR / "results" / "metrics" / "results_summary.json",
+        Path("results/metrics/results_summary.json").resolve(),
+        Path.cwd() / "results" / "metrics" / "results_summary.json",
+        Path(os.path.abspath("results/metrics/results_summary.json")),
+    ]
     
-    if not metrics_file.exists():
-        print("  No results file found for comparison")
+    # Also try to get path from config
+    try:
+        config_path = experiments[0].get('config', 'configs/config.yaml')
+        if not os.path.isabs(config_path):
+            config_path = str(SCRIPT_DIR / config_path)
+        config = load_config(config_path)
+        metrics_dir = config.get('paths', {}).get('metrics_dir', 'results/metrics/')
+        
+        # Resolve path - could be relative to script dir or cwd
+        if not os.path.isabs(metrics_dir):
+            # Try both script dir and cwd
+            possible_paths.insert(0, Path(SCRIPT_DIR / metrics_dir) / "results_summary.json")
+            possible_paths.insert(1, Path(os.path.abspath(metrics_dir)) / "results_summary.json")
+        else:
+            possible_paths.insert(0, Path(metrics_dir) / "results_summary.json")
+    except Exception as e:
+        pass  # Use fallback paths
+    
+    metrics_file = None
+    for path in possible_paths:
+        if path.exists():
+            metrics_file = path
+            break
+    
+    if metrics_file is None or not metrics_file.exists():
+        print(f"  No results file found for comparison")
+        print(f"  Checked paths:")
+        for path in possible_paths[:5]:  # Show first 5
+            print(f"    - {path} (exists: {path.exists()})")
+        print(f"  Current working directory: {Path.cwd()}")
+        print(f"  Script directory: {SCRIPT_DIR}")
         return
     
     try:
         with open(metrics_file, 'r') as f:
             all_results = json.load(f)
         
-        # Get successful model names
-        successful_models = []
-        for exp, success in zip(experiments, results):
-            if success:
-                model_name = exp.get('model')
-                if isinstance(model_name, str):
-                    # Map to display name
-                    model_display_map = {
-                        'xgboost': 'XGBoost',
-                        'prophet': 'Prophet',
-                        'arima': 'ARIMA',
-                        'random_forest': 'RandomForest',
-                        'gradient_boosting': 'GradientBoosting',
-                        'lightgbm': 'LightGBM',
-                        'ridge': 'Ridge',
-                        'lstm': 'LSTM',
-                        'gru': 'GRU',
-                        'nbeats': 'NBEATS',
-                        'transformer': 'Transformer',
-                        'tcn': 'TCN',
-                        'ets': 'ETS',
-                        'theta': 'Theta'
-                    }
-                    display_name = model_display_map.get(model_name, model_name.capitalize())
-                    successful_models.append(display_name)
+        # Get successful model names with mapping
+        model_display_map = {
+            'xgboost': 'XGBoost',
+            'prophet': 'Prophet',
+            'arima': 'ARIMA',
+            'random_forest': 'RandomForest',
+            'gradient_boosting': 'GradientBoosting',
+            'lightgbm': 'LightGBM',
+            'ridge': 'Ridge',
+            'lstm': 'LSTM',
+            'gru': 'GRU',
+            'nbeats': 'NBEATS',
+            'transformer': 'Transformer',
+            'tcn': 'TCN',
+            'ets': 'ETS',
+            'theta': 'Theta'
+        }
         
-        if len(successful_models) < 2:
-            print("  Need at least 2 successful experiments to compare")
+        # Get all models that have results (not just from experiments)
+        available_models = list(all_results.keys())
+        
+        if len(available_models) < 1:
+            print("  No model results found for comparison")
             return
         
-        # Compare metrics for each horizon
+        # Even if only one model, show the table for clarity
+        
+        # Get horizons from config
         horizons = DATA_CONFIG.get('horizons', [1])
         
-        print("\n  Comparison by Forecast Horizon:")
-        print("-" * 80)
+        # Collect all metrics for all models and horizons
+        all_model_metrics = {}
+        metric_names = ['mae', 'rmse', 'mape', 'smape', 'r2', 'mase']
         
-        for horizon in horizons:
-            print(f"\n  Horizon {horizon} steps ahead:")
-            print("    " + "-" * 76)
-            
-            # Collect metrics for this horizon
-            model_metrics = {}
-            for model_name in successful_models:
-                if model_name in all_results:
-                    metrics = all_results[model_name].get('metrics', {})
-                    model_metrics[model_name] = {
-                        'mae': metrics.get(f'test_h{horizon}_mae'),
-                        'rmse': metrics.get(f'test_h{horizon}_rmse'),
-                        'mape': metrics.get(f'test_h{horizon}_mape'),
-                        'r2': metrics.get(f'test_h{horizon}_r2')
-                    }
-            
-            # Print comparison table
-            print(f"    {'Model':<20} {'MAE':<12} {'RMSE':<12} {'MAPE':<12} {'R²':<12}")
-            print("    " + "-" * 76)
-            
-            for model_name, metrics in model_metrics.items():
-                mae = metrics['mae']
-                rmse = metrics['rmse']
-                mape = metrics['mape']
-                r2 = metrics['r2']
+        for model_name in available_models:
+            if model_name in all_results:
+                metrics = all_results[model_name].get('metrics', {})
+                all_model_metrics[model_name] = {}
                 
-                if mae is not None:
-                    print(f"    {model_name:<20} {mae:<12.4f} {rmse:<12.4f} {mape:<12.2f} {r2:<12.4f}")
+                for horizon in horizons:
+                    all_model_metrics[model_name][horizon] = {}
+                    for metric in metric_names:
+                        key = f'test_h{horizon}_{metric}'
+                        if key in metrics:
+                            all_model_metrics[model_name][horizon][metric] = metrics[key]
+        
+        # Print comprehensive comparison table
+        print("\n" + "=" * 100)
+        print("FINAL MODEL COMPARISON TABLE")
+        print("=" * 100)
+        
+        # Table for each horizon
+        for horizon in horizons:
+            print(f"\n{'Forecast Horizon: ' + str(horizon) + ' steps ahead':^100}")
+            print("-" * 100)
             
-            # Find best model for each metric
-            print("\n    Best Models:")
-            if model_metrics:
+            # Header
+            header = f"{'Model':<18}"
+            header += f"{'MAE':>12}  {'RMSE':>12}  {'MAPE':>10}  {'SMAPE':>10}  {'R²':>10}  {'MASE':>10}"
+            print(header)
+            print("-" * 100)
+            
+            # Data rows
+            for model_name in sorted(available_models):
+                if model_name in all_model_metrics and horizon in all_model_metrics[model_name]:
+                    metrics = all_model_metrics[model_name][horizon]
+                    row = f"{model_name:<18}"
+                    
+                    # Format each metric
+                    mae = metrics.get('mae')
+                    rmse = metrics.get('rmse')
+                    mape = metrics.get('mape')
+                    smape = metrics.get('smape')
+                    r2 = metrics.get('r2')
+                    mase = metrics.get('mase')
+                    
+                    row += f"{mae:>12.4f}  " if mae is not None else f"{'N/A':>12}  "
+                    row += f"{rmse:>12.4f}  " if rmse is not None else f"{'N/A':>12}  "
+                    row += f"{mape:>10.2f}  " if mape is not None else f"{'N/A':>10}  "
+                    row += f"{smape:>10.2f}  " if smape is not None else f"{'N/A':>10}  "
+                    row += f"{r2:>10.4f}  " if r2 is not None else f"{'N/A':>10}  "
+                    row += f"{mase:>10.4f}" if mase is not None else f"{'N/A':>10}"
+                    
+                    print(row)
+            
+            # Summary: Best models for each metric
+            print("-" * 100)
+            print("Best Models (lower is better for MAE/RMSE/MAPE/SMAPE/MASE, higher is better for R²):")
+            
+            # Collect valid metrics for comparison
+            valid_metrics = {}
+            for model_name in available_models:
+                if model_name in all_model_metrics and horizon in all_model_metrics[model_name]:
+                    metrics = all_model_metrics[model_name][horizon]
+                    valid_metrics[model_name] = metrics
+            
+            if valid_metrics:
                 # Best MAE (lowest)
-                best_mae = min(model_metrics.items(), key=lambda x: x[1]['mae'] if x[1]['mae'] is not None else float('inf'))
-                print(f"      MAE:  {best_mae[0]} ({best_mae[1]['mae']:.4f})")
+                best_mae = min(valid_metrics.items(), 
+                              key=lambda x: x[1].get('mae') if x[1].get('mae') is not None else float('inf'))
+                if best_mae[1].get('mae') is not None:
+                    print(f"  MAE:   {best_mae[0]:<15} ({best_mae[1]['mae']:.4f})")
                 
                 # Best RMSE (lowest)
-                best_rmse = min(model_metrics.items(), key=lambda x: x[1]['rmse'] if x[1]['rmse'] is not None else float('inf'))
-                print(f"      RMSE: {best_rmse[0]} ({best_rmse[1]['rmse']:.4f})")
+                best_rmse = min(valid_metrics.items(), 
+                               key=lambda x: x[1].get('rmse') if x[1].get('rmse') is not None else float('inf'))
+                if best_rmse[1].get('rmse') is not None:
+                    print(f"  RMSE:  {best_rmse[0]:<15} ({best_rmse[1]['rmse']:.4f})")
                 
                 # Best MAPE (lowest)
-                best_mape = min(model_metrics.items(), key=lambda x: x[1]['mape'] if x[1]['mape'] is not None else float('inf'))
-                print(f"      MAPE: {best_mape[0]} ({best_mape[1]['mape']:.2f}%)")
+                best_mape = min(valid_metrics.items(), 
+                               key=lambda x: x[1].get('mape') if x[1].get('mape') is not None else float('inf'))
+                if best_mape[1].get('mape') is not None:
+                    print(f"  MAPE:  {best_mape[0]:<15} ({best_mape[1]['mape']:.2f}%)")
+                
+                # Best SMAPE (lowest)
+                best_smape = min(valid_metrics.items(), 
+                                key=lambda x: x[1].get('smape') if x[1].get('smape') is not None else float('inf'))
+                if best_smape[1].get('smape') is not None:
+                    print(f"  SMAPE: {best_smape[0]:<15} ({best_smape[1]['smape']:.2f}%)")
                 
                 # Best R² (highest)
-                best_r2 = max(model_metrics.items(), key=lambda x: x[1]['r2'] if x[1]['r2'] is not None else float('-inf'))
-                print(f"      R²:   {best_r2[0]} ({best_r2[1]['r2']:.4f})")
+                best_r2 = max(valid_metrics.items(), 
+                             key=lambda x: x[1].get('r2') if x[1].get('r2') is not None else float('-inf'))
+                if best_r2[1].get('r2') is not None:
+                    print(f"  R²:    {best_r2[0]:<15} ({best_r2[1]['r2']:.4f})")
+                
+                # Best MASE (lowest)
+                best_mase = min(valid_metrics.items(), 
+                               key=lambda x: x[1].get('mase') if x[1].get('mase') is not None else float('inf'))
+                if best_mase[1].get('mase') is not None:
+                    print(f"  MASE:  {best_mase[0]:<15} ({best_mase[1]['mase']:.4f})")
         
-        print("\n  Full results saved to: results/metrics/results_summary.json")
-        print("  Visualizations saved to: results/figures/")
+        print("\n" + "=" * 100)
+        print("Note: Full results saved to: results/metrics/results_summary.json")
+        print("      Visualizations saved to: results/figures/")
+        print("=" * 100)
         
     except Exception as e:
         print(f"  Error comparing results: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 if __name__ == "__main__":

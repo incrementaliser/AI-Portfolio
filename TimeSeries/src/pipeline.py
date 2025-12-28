@@ -26,9 +26,29 @@ class TimeSeriesPipeline:
             config: Configuration dictionary
         """
         self.config = config
+        # Resolve all paths relative to script directory
+        self._resolve_paths()
         self.data_loader = TimeSeriesDataLoader(config)
         self.evaluator = TimeSeriesEvaluator(config)
         self.results = {}
+    
+    def _resolve_paths(self):
+        """Resolve all paths in config to absolute paths relative to script location."""
+        import sys
+        from pathlib import Path
+        
+        # Get the directory where the pipeline module is located
+        pipeline_dir = Path(__file__).parent.parent.absolute()
+        
+        # Resolve all paths
+        for path_key in ['data_raw', 'data_processed', 'models_dir', 'figures_dir', 'metrics_dir']:
+            if path_key in self.config.get('paths', {}):
+                path = self.config['paths'][path_key]
+                if not os.path.isabs(path):
+                    # Resolve relative to TimeSeries directory
+                    self.config['paths'][path_key] = str(pipeline_dir / path)
+                else:
+                    self.config['paths'][path_key] = os.path.abspath(path)
         
     def run(
         self, 
@@ -167,42 +187,202 @@ class TimeSeriesPipeline:
             print("=" * 60)
             print(f"  Model type: {model.model_type}")
             
-            if use_wandb:
-                # Initialize wandb run for this model
-                try:
-                    run = wandb.init(
-                        project=self.config['project']['name'],
-                        entity=self.config['project'].get('entity'),
-                        name=f"{model_name}",
-                        config=TimeSeriesModelFactory.get_model_params(model),
-                        reinit=True
-                    )
-                except Exception as e:
-                    print(f"  Warning: Could not initialize wandb: {e}")
-                    use_wandb = False
+            # Check if model already exists
+            model_path = os.path.join(
+                self.config['paths']['models_dir'],
+                f"{model_name}.pkl"
+            )
+            model_path = os.path.abspath(model_path)
             
-            try:
-                # Evaluate model
-                metrics, trained_model, predictions_dict = self.evaluator.evaluate_model(
-                    model,
-                    train_series,
-                    val_series,
-                    test_series,
-                    forecast_horizons=forecast_horizons
-                )
+            metrics = {}
+            predictions_dict = {}
+            trained_model = None
+            model_loaded = False
+            
+            # Try to load existing model
+            if os.path.exists(model_path):
+                print(f"  Loading existing model from: {model_path}")
+                try:
+                    trained_model = joblib.load(model_path)
+                    model_loaded = True
+                    print("  Model loaded successfully")
+                    
+                    # Try to load metrics from saved results instead of re-evaluating
+                    # (Re-evaluation can fail for models like Prophet that can't be refit)
+                    metrics_file = os.path.join(
+                        self.config['paths']['metrics_dir'],
+                        'results_summary.json'
+                    )
+                    metrics_file = os.path.abspath(metrics_file)
+                    
+                    if os.path.exists(metrics_file):
+                        try:
+                            import json
+                            with open(metrics_file, 'r') as f:
+                                saved_results = json.load(f)
+                            if model_name in saved_results:
+                                metrics = saved_results[model_name].get('metrics', {})
+                                
+                                # Check if test metrics exist for all horizons
+                                forecast_horizons = self.config['data'].get('forecast_horizons', [1])
+                                has_all_test_metrics = all(
+                                    any(f'test_h{h}_{m}' in metrics for m in ['mae', 'rmse'])
+                                    for h in forecast_horizons
+                                )
+                                
+                                if has_all_test_metrics:
+                                    print("  Loaded metrics from saved results (including test metrics)")
+                                    # Create empty predictions dict (we have metrics but not predictions)
+                                    predictions_dict = {}
+                                else:
+                                    print("  Loaded metrics from saved results, but test metrics are missing")
+                                    print("  Will re-evaluate to get test metrics...")
+                                    metrics = {}  # Clear metrics to force re-evaluation
+                        except Exception as e:
+                            print(f"  Could not load saved metrics: {e}")
+                            metrics = {}
+                    
+                    # If no saved metrics or test metrics are missing, try to re-evaluate
+                    if not metrics:
+                        print("  Re-evaluating loaded model...")
+                        try:
+                            # For Prophet, we need to create a fresh instance since it can't be refit
+                            if hasattr(trained_model, '__class__') and 'ProphetWrapper' in trained_model.__class__.__name__:
+                                print("  Creating fresh Prophet instance for evaluation...")
+                                from models.statistical.statistical import ProphetWrapper
+                                if hasattr(trained_model, 'get_params'):
+                                    prophet_params = trained_model.get_params()
+                                else:
+                                    prophet_params = getattr(trained_model, 'prophet_params', {})
+                                fresh_model = ProphetWrapper(**prophet_params)
+                                metrics, trained_model, predictions_dict = self.evaluator.evaluate_model(
+                                    fresh_model,
+                                    train_series,
+                                    val_series,
+                                    test_series,
+                                    forecast_horizons=forecast_horizons
+                                )
+                            else:
+                                metrics, trained_model, predictions_dict = self.evaluator.evaluate_model(
+                                    trained_model,
+                                    train_series,
+                                    val_series,
+                                    test_series,
+                                    forecast_horizons=forecast_horizons
+                                )
+                        except Exception as eval_error:
+                            print(f"  Warning: Re-evaluation failed: {eval_error}")
+                            import traceback
+                            traceback.print_exc()
+                            print("  Using saved metrics if available, or skipping this model")
+                            metrics = {}
+                            predictions_dict = {}
+                    
+                    if not metrics:
+                        print(f"  Warning: No metrics available for loaded model, will train new one")
+                        model_loaded = False
+                        trained_model = None
+                except Exception as e:
+                    print(f"  Warning: Could not load model, will train new one: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    model_loaded = False
+                    trained_model = None
+            
+            # Train new model if not loaded or loading failed
+            if not model_loaded:
+                if use_wandb:
+                    # Initialize wandb run for this model
+                    try:
+                        run = wandb.init(
+                            project=self.config['project']['name'],
+                            entity=self.config['project'].get('entity'),
+                            name=f"{model_name}",
+                            config=TimeSeriesModelFactory.get_model_params(model),
+                            reinit=True
+                        )
+                    except Exception as e:
+                        print(f"  Warning: Could not initialize wandb: {e}")
+                        use_wandb = False
                 
-                if not metrics:
-                    print(f"  Skipping {model_name} due to evaluation errors")
+                try:
+                    # Evaluate model
+                    metrics, trained_model, predictions_dict = self.evaluator.evaluate_model(
+                        model,
+                        train_series,
+                        val_series,
+                        test_series,
+                        forecast_horizons=forecast_horizons
+                    )
+                    
+                    if not metrics:
+                        print(f"  Skipping {model_name} due to evaluation errors")
+                        if use_wandb:
+                            wandb.finish()
+                        continue
+                    
+                    # Save newly trained model
+                    try:
+                        joblib.dump(trained_model, model_path)
+                        print(f"  Model saved to: {model_path}")
+                    except Exception as e:
+                        print(f"  Warning: Could not save model: {e}")
+                    
+                    # Log to wandb for newly trained models
+                    if use_wandb:
+                        try:
+                            self.evaluator.log_to_wandb(
+                                model_name,
+                                metrics,
+                                trained_model,
+                                TimeSeriesModelFactory.get_model_params(model)
+                            )
+                            
+                            # Plot and log forecast for each horizon
+                            for horizon in forecast_horizons[:2]:  # Log first 2 horizons
+                                if f'horizon_{horizon}' in predictions_dict:
+                                    pred_data = predictions_dict[f'horizon_{horizon}']
+                                    fig = self.evaluator.plot_forecast(
+                                        pred_data['actuals'],
+                                        pred_data['predictions'],
+                                        model_name,
+                                        horizon,
+                                        self.config['paths']['figures_dir']
+                                    )
+                                    wandb.log({f"{model_name}_forecast_h{horizon}": wandb.Image(fig)})
+                                    fig.clf()
+                            
+                            # Plot and log residuals for first horizon
+                            first_pred_data = predictions_dict[f'horizon_{forecast_horizons[0]}']
+                            fig = self.evaluator.plot_residuals(
+                                first_pred_data['actuals'],
+                                first_pred_data['predictions'],
+                                model_name,
+                                self.config['paths']['figures_dir']
+                            )
+                            wandb.log({f"{model_name}_residuals": wandb.Image(fig)})
+                            fig.clf()
+                            
+                        except Exception as e:
+                            print(f"  Warning: Could not log to wandb: {e}")
+                        
+                        wandb.finish()
+                        
+                except Exception as e:
+                    print(f"  Error training {model_name}: {e}")
+                    import traceback
+                    traceback.print_exc()
                     if use_wandb:
                         wandb.finish()
                     continue
-                
-                # Store results
+            
+            # Store results (for both loaded and newly trained models)
+            if metrics:
                 self.results[model_name] = {
                     'model': trained_model,
                     'metrics': metrics,
                     'predictions': predictions_dict,
-                    'model_type': model.model_type
+                    'model_type': model.model_type if hasattr(model, 'model_type') else (trained_model.model_type if hasattr(trained_model, 'model_type') else 'unknown')
                 }
                 
                 # Print key metrics for first horizon
@@ -217,65 +397,6 @@ class TimeSeriesPipeline:
                 if 'cv_mae_mean' in metrics:
                     print(f"\n  Cross-validation (MAE): {metrics['cv_mae_mean']:.4f} "
                           f"(±{metrics['cv_mae_std']:.4f})")
-                
-                # Log to wandb
-                if use_wandb:
-                    try:
-                        self.evaluator.log_to_wandb(
-                            model_name,
-                            metrics,
-                            trained_model,
-                            TimeSeriesModelFactory.get_model_params(model)
-                        )
-                        
-                        # Plot and log forecast for each horizon
-                        for horizon in forecast_horizons[:2]:  # Log first 2 horizons
-                            if f'horizon_{horizon}' in predictions_dict:
-                                pred_data = predictions_dict[f'horizon_{horizon}']
-                                fig = self.evaluator.plot_forecast(
-                                    pred_data['actuals'],
-                                    pred_data['predictions'],
-                                    model_name,
-                                    horizon,
-                                    self.config['paths']['figures_dir']
-                                )
-                                wandb.log({f"{model_name}_forecast_h{horizon}": wandb.Image(fig)})
-                                fig.clf()
-                        
-                        # Plot and log residuals for first horizon
-                        first_pred_data = predictions_dict[f'horizon_{forecast_horizons[0]}']
-                        fig = self.evaluator.plot_residuals(
-                            first_pred_data['actuals'],
-                            first_pred_data['predictions'],
-                            model_name,
-                            self.config['paths']['figures_dir']
-                        )
-                        wandb.log({f"{model_name}_residuals": wandb.Image(fig)})
-                        fig.clf()
-                        
-                    except Exception as e:
-                        print(f"  Warning: Could not log to wandb: {e}")
-                    
-                    wandb.finish()
-                
-                # Save model
-                model_path = os.path.join(
-                    self.config['paths']['models_dir'],
-                    f"{model_name}.pkl"
-                )
-                try:
-                    joblib.dump(trained_model, model_path)
-                    print(f"  Model saved to: {model_path}")
-                except Exception as e:
-                    print(f"  Warning: Could not save model: {e}")
-                
-            except Exception as e:
-                print(f"  Error training {model_name}: {e}")
-                import traceback
-                traceback.print_exc()
-                if use_wandb:
-                    wandb.finish()
-                continue
         
         if not self.results:
             print("\nNo models were successfully trained!")
@@ -337,7 +458,14 @@ class TimeSeriesPipeline:
         print("\n[5/5] Saving results...")
         print("-" * 80)
         
-        save_results(self.results, self.config['paths']['metrics_dir'], append=True)
+        # Ensure metrics_dir is absolute before saving
+        metrics_dir = self.config['paths']['metrics_dir']
+        if not os.path.isabs(metrics_dir):
+            metrics_dir = os.path.abspath(metrics_dir)
+            self.config['paths']['metrics_dir'] = metrics_dir
+        
+        print(f"  Saving results to: {metrics_dir}")
+        save_results(self.results, metrics_dir, append=True)
         
         # Find best model based on first horizon MAE
         best_model_name = self._get_best_model(
