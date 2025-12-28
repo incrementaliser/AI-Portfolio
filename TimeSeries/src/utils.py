@@ -27,8 +27,15 @@ def setup_directories(config):
         os.makedirs(directory, exist_ok=True)
 
 
-def save_results(results, path):
-    """Save results to JSON file"""
+def save_results(results, path, append=False):
+    """
+    Save results to JSON file.
+    
+    Args:
+        results: Dictionary of model results
+        path: Directory path to save results
+        append: If True, append to existing results instead of overwriting
+    """
     os.makedirs(path, exist_ok=True)
     
     # Prepare results for JSON serialization
@@ -47,6 +54,18 @@ def save_results(results, path):
     
     # Save to file
     results_path = os.path.join(path, 'results_summary.json')
+    
+    # If appending, load existing results first
+    if append and os.path.exists(results_path):
+        try:
+            with open(results_path, 'r') as f:
+                existing_results = json.load(f)
+            # Merge new results with existing (new overwrites old for same model)
+            existing_results.update(json_results)
+            json_results = existing_results
+        except:
+            pass  # If can't load, just overwrite
+    
     with open(results_path, 'w') as f:
         json.dump(json_results, f, indent=4)
     

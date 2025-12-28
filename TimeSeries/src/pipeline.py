@@ -337,7 +337,7 @@ class TimeSeriesPipeline:
         print("\n[5/5] Saving results...")
         print("-" * 80)
         
-        save_results(self.results, self.config['paths']['metrics_dir'])
+        save_results(self.results, self.config['paths']['metrics_dir'], append=True)
         
         # Find best model based on first horizon MAE
         best_model_name = self._get_best_model(

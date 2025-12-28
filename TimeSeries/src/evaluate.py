@@ -209,9 +209,16 @@ class TimeSeriesEvaluator:
                 test_data = test_data[:forecast_horizon]
             
             try:
-                # Fit model
+                # Fit model - Prophet and Darts models need Series, others can use values
                 if isinstance(train_data, pd.Series):
-                    model.fit(train_data.values)
+                    if hasattr(model, '__class__'):
+                        class_name = model.__class__.__name__
+                        if 'ProphetWrapper' in class_name or 'DartsModelWrapper' in class_name:
+                            model.fit(train_data)
+                        else:
+                            model.fit(train_data.values)
+                    else:
+                        model.fit(train_data.values)
                 else:
                     model.fit(train_data)
                 
@@ -267,7 +274,15 @@ class TimeSeriesEvaluator:
         for i in range(0, len(test_data) - forecast_horizon + 1, step_size):
             try:
                 # Fit model on current training data
-                model.fit(current_train.values)
+                # Prophet and Darts models need Series with datetime index, others can use values
+                if hasattr(model, '__class__'):
+                    class_name = model.__class__.__name__
+                    if 'ProphetWrapper' in class_name or 'DartsModelWrapper' in class_name:
+                        model.fit(current_train)
+                    else:
+                        model.fit(current_train.values)
+                else:
+                    model.fit(current_train.values)
                 
                 # Make prediction
                 pred = model.predict(steps=forecast_horizon)
@@ -319,9 +334,19 @@ class TimeSeriesEvaluator:
         # Fit model on training data
         print(f"  Training model on {len(train_data)} samples...")
         try:
-            model.fit(train_data.values)
+            # Prophet and Darts models need Series with datetime index, others can use values
+            if hasattr(model, '__class__'):
+                class_name = model.__class__.__name__
+                if 'ProphetWrapper' in class_name or 'DartsModelWrapper' in class_name:
+                    model.fit(train_data)
+                else:
+                    model.fit(train_data.values)
+            else:
+                model.fit(train_data.values)
         except Exception as e:
             print(f"  Error fitting model: {e}")
+            import traceback
+            traceback.print_exc()
             return {}, model, {}
         
         # Evaluate on validation set
@@ -347,7 +372,15 @@ class TimeSeriesEvaluator:
             try:
                 # Retrain on train + val for final test evaluation
                 combined_train = pd.concat([train_data, val_data])
-                model.fit(combined_train.values)
+                # Prophet and Darts models need Series with datetime index, others can use values
+                if hasattr(model, '__class__'):
+                    class_name = model.__class__.__name__
+                    if 'ProphetWrapper' in class_name or 'DartsModelWrapper' in class_name:
+                        model.fit(combined_train)
+                    else:
+                        model.fit(combined_train.values)
+                else:
+                    model.fit(combined_train.values)
                 
                 test_pred = model.predict(steps=min(horizon, len(test_data)))
                 test_actual = test_data.values[:len(test_pred)]
