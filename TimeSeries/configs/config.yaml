@@ -1,0 +1,145 @@
+# Time Series Forecasting Pipeline Configuration
+
+project:
+  name: "time-series-forecasting"
+  entity: null  # Your wandb username/team
+
+data:
+  # Data source
+  csv_path: "data/raw/sample_timeseries.csv"  # Sample data included
+  timestamp_col: "date"
+  target_cols: ["value"]  # List of target columns (for multivariate)
+  
+  # Temporal splits
+  test_size: 0.2
+  validation_size: 0.1  # Fraction of remaining data after test split
+  
+  # Sequence parameters
+  lookback_window: 30  # Number of past time steps for ML/DL models
+  forecast_horizons: [1, 7, 30]  # Multiple horizons to evaluate
+  
+  # Random seed for reproducibility
+  random_state: 42
+
+preprocessing:
+  # Scaling method: 'standard', 'minmax', 'robust', or null
+  scaling: "standard"
+  
+  # Missing value handling: 'interpolate', 'ffill', 'bfill', 'drop'
+  missing_values: "interpolate"
+  
+  # Additional features to create
+  add_features: ["day_of_week", "month"]  # Options: hour, day, day_of_week, month, quarter, year
+
+models:
+  # Statistical Models
+  statistical:
+    arima:
+      order: [1, 1, 1]  # (p, d, q)
+    
+    prophet:
+      seasonality_mode: "multiplicative"  # or "additive"
+      yearly_seasonality: true
+      weekly_seasonality: true
+      daily_seasonality: false
+    
+    ets:
+      seasonal_periods: 7  # Set to null for non-seasonal
+      trend: "add"
+      seasonal: "add"
+    
+    theta:
+      period: 7  # Seasonal period
+  
+  # Machine Learning Models
+  ml:
+    random_forest:
+      n_estimators: 200
+      max_depth: 15
+      min_samples_split: 5
+      random_state: 42
+    
+    gradient_boosting:
+      n_estimators: 100
+      learning_rate: 0.1
+      max_depth: 5
+      random_state: 42
+    
+    xgboost:
+      # Default parameters - can be overridden in experiments
+      n_estimators: 100
+      max_depth: 6
+      learning_rate: 0.3
+      random_state: 42
+    
+    lightgbm:
+      n_estimators: 100
+      max_depth: 5
+      learning_rate: 0.1
+      random_state: 42
+    
+    ridge:
+      alpha: 1.0
+      random_state: 42
+  
+  # Deep Learning Models
+  deep_learning:
+    lstm:
+      hidden_dim: 64
+      n_rnn_layers: 2
+      dropout: 0.2
+      batch_size: 32
+      n_epochs: 50
+    
+    gru:
+      hidden_dim: 64
+      n_rnn_layers: 2
+      dropout: 0.2
+      batch_size: 32
+      n_epochs: 50
+    
+    nbeats:
+      num_stacks: 30
+      num_blocks: 1
+      num_layers: 4
+      layer_widths: 256
+      batch_size: 32
+      n_epochs: 50
+    
+    transformer:
+      d_model: 64
+      nhead: 4
+      num_encoder_layers: 3
+      num_decoder_layers: 3
+      dim_feedforward: 256
+      dropout: 0.1
+      batch_size: 32
+      n_epochs: 50
+    
+    tcn:
+      num_filters: 64
+      kernel_size: 3
+      num_layers: 3
+      dropout: 0.2
+      batch_size: 32
+      n_epochs: 50
+
+evaluation:
+  # Metrics to calculate: mae, mse, rmse, mape, smape, mase, r2
+  metrics: ["mae", "rmse", "mape", "smape", "r2"]
+  
+  # Cross-validation settings
+  cv_splits: 5
+  
+  # Backtesting settings
+  backtesting:
+    enabled: false
+    initial_train_size: 0.7
+    step_size: 10
+
+paths:
+  data_raw: "data/raw/"
+  data_processed: "data/processed/"
+  models_dir: "results/models/"
+  figures_dir: "results/figures/"
+  metrics_dir: "results/metrics/"

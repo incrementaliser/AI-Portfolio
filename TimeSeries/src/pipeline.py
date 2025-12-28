@@ -1,0 +1,436 @@
+"""
+Time series forecasting pipeline orchestration
+"""
+import wandb
+import os
+import joblib
+import pandas as pd
+import numpy as np
+from typing import Dict, List, Optional
+from src.data_loader import TimeSeriesDataLoader
+from models.models import TimeSeriesModelFactory
+from src.evaluate import TimeSeriesEvaluator
+from src.utils import setup_directories, save_results
+import warnings
+warnings.filterwarnings('ignore')
+
+
+class TimeSeriesPipeline:
+    """Main pipeline for time series forecasting model comparison."""
+    
+    def __init__(self, config: Dict):
+        """
+        Initialize time series pipeline.
+        
+        Args:
+            config: Configuration dictionary
+        """
+        self.config = config
+        self.data_loader = TimeSeriesDataLoader(config)
+        self.evaluator = TimeSeriesEvaluator(config)
+        self.results = {}
+        
+    def run(
+        self, 
+        csv_path: str = None,
+        timestamp_col: str = None,
+        target_cols: List[str] = None,
+        model_names: List[str] = None,
+        use_wandb: bool = True
+    ) -> Dict:
+        """
+        Execute the complete time series forecasting pipeline.
+        
+        Args:
+            csv_path: Path to CSV file with time series data
+            timestamp_col: Name of timestamp column
+            target_cols: List of target column names
+            model_names: List of specific model names to run (e.g., ['xgboost', 'arima'])
+            use_wandb: Whether to use Weights & Biases logging
+            
+        Returns:
+            Dictionary containing results for all models
+        """
+        # Setup directories
+        setup_directories(self.config)
+        
+        print("=" * 80)
+        print("Starting Time Series Forecasting Pipeline")
+        print("=" * 80)
+        
+        # [1/5] Load and prepare data
+        print("\n[1/5] Loading and preparing time series data...")
+        print("-" * 80)
+        
+        try:
+            data = self.data_loader.prepare_data(
+                filepath=csv_path,
+                timestamp_col=timestamp_col,
+                target_cols=target_cols,
+                apply_scaling=True
+            )
+            
+            train_data = data['train']
+            val_data = data['val']
+            test_data = data['test']
+            
+            # Get target column(s)
+            if target_cols is None:
+                target_cols = self.config['data'].get('target_cols', ['value'])
+            if isinstance(target_cols, str):
+                target_cols = [target_cols]
+            
+            # For univariate forecasting, extract the first target
+            target_col = target_cols[0]
+            
+            print(f"Dataset loaded successfully!")
+            print(f"  Total samples: {len(train_data) + len(val_data) + len(test_data)}")
+            print(f"  Train size: {len(train_data)}")
+            print(f"  Validation size: {len(val_data)}")
+            print(f"  Test size: {len(test_data)}")
+            print(f"  Target column: {target_col}")
+            print(f"  Date range: {train_data.index[0]} to {test_data.index[-1]}")
+            
+            # Extract target series
+            train_series = train_data[target_col]
+            val_series = val_data[target_col]
+            test_series = test_data[target_col]
+            
+            # Save processed data
+            self.data_loader.save_processed_data(
+                data,
+                self.config['paths']['data_processed']
+            )
+            
+        except Exception as e:
+            print(f"Error loading data: {e}")
+            print("Please ensure:")
+            print("  1. CSV file exists at the specified path")
+            print("  2. Timestamp column and target columns are correct")
+            print("  3. Data is properly formatted")
+            return {}
+        
+        # [2/5] Create models
+        print("\n[2/5] Creating time series models...")
+        print("-" * 80)
+        
+        # Create models - factory will only create models enabled in config
+        models = TimeSeriesModelFactory.create_models(self.config)
+        
+        # Filter to only requested models if model_names specified
+        if model_names is not None:
+            # Map model names to their display names
+            model_name_mapping = {
+                'arima': 'ARIMA',
+                'prophet': 'Prophet',
+                'ets': 'ETS',
+                'theta': 'Theta',
+                'random_forest': 'RandomForest',
+                'gradient_boosting': 'GradientBoosting',
+                'xgboost': 'XGBoost',
+                'lightgbm': 'LightGBM',
+                'ridge': 'Ridge',
+                'lstm': 'LSTM',
+                'gru': 'GRU',
+                'nbeats': 'NBEATS',
+                'transformer': 'Transformer',
+                'tcn': 'TCN'
+            }
+            
+            filtered_models = {}
+            for model_name in model_names:
+                display_name = model_name_mapping.get(model_name, model_name.capitalize())
+                if display_name in models:
+                    filtered_models[display_name] = models[display_name]
+                else:
+                    print(f"  Warning: Model '{model_name}' not found in created models")
+            
+            models = filtered_models
+        
+        if not models:
+            print("No models to train! Check your configuration.")
+            return {}
+        
+        print(f"Models to train: {list(models.keys())}")
+        print(f"Model types: {set([m.model_type for m in models.values()])}")
+        
+        # Get forecast horizons
+        forecast_horizons = self.config['data'].get('forecast_horizons', [1])
+        print(f"Forecast horizons: {forecast_horizons}")
+        
+        # [3/5] Train and evaluate each model
+        print("\n[3/5] Training and evaluating models...")
+        print("-" * 80)
+        
+        for idx, (model_name, model) in enumerate(models.items(), 1):
+            print(f"\n[Model {idx}/{len(models)}] {model_name}")
+            print("=" * 60)
+            print(f"  Model type: {model.model_type}")
+            
+            if use_wandb:
+                # Initialize wandb run for this model
+                try:
+                    run = wandb.init(
+                        project=self.config['project']['name'],
+                        entity=self.config['project'].get('entity'),
+                        name=f"{model_name}",
+                        config=TimeSeriesModelFactory.get_model_params(model),
+                        reinit=True
+                    )
+                except Exception as e:
+                    print(f"  Warning: Could not initialize wandb: {e}")
+                    use_wandb = False
+            
+            try:
+                # Evaluate model
+                metrics, trained_model, predictions_dict = self.evaluator.evaluate_model(
+                    model,
+                    train_series,
+                    val_series,
+                    test_series,
+                    forecast_horizons=forecast_horizons
+                )
+                
+                if not metrics:
+                    print(f"  Skipping {model_name} due to evaluation errors")
+                    if use_wandb:
+                        wandb.finish()
+                    continue
+                
+                # Store results
+                self.results[model_name] = {
+                    'model': trained_model,
+                    'metrics': metrics,
+                    'predictions': predictions_dict,
+                    'model_type': model.model_type
+                }
+                
+                # Print key metrics for first horizon
+                first_horizon = forecast_horizons[0]
+                print(f"\n  Results for horizon {first_horizon}:")
+                for metric in ['mae', 'rmse', 'mape', 'r2']:
+                    key = f'test_h{first_horizon}_{metric}'
+                    if key in metrics:
+                        print(f"    {metric.upper()}: {metrics[key]:.4f}")
+                
+                # Print CV results if available
+                if 'cv_mae_mean' in metrics:
+                    print(f"\n  Cross-validation (MAE): {metrics['cv_mae_mean']:.4f} "
+                          f"(±{metrics['cv_mae_std']:.4f})")
+                
+                # Log to wandb
+                if use_wandb:
+                    try:
+                        self.evaluator.log_to_wandb(
+                            model_name,
+                            metrics,
+                            trained_model,
+                            TimeSeriesModelFactory.get_model_params(model)
+                        )
+                        
+                        # Plot and log forecast for each horizon
+                        for horizon in forecast_horizons[:2]:  # Log first 2 horizons
+                            if f'horizon_{horizon}' in predictions_dict:
+                                pred_data = predictions_dict[f'horizon_{horizon}']
+                                fig = self.evaluator.plot_forecast(
+                                    pred_data['actuals'],
+                                    pred_data['predictions'],
+                                    model_name,
+                                    horizon,
+                                    self.config['paths']['figures_dir']
+                                )
+                                wandb.log({f"{model_name}_forecast_h{horizon}": wandb.Image(fig)})
+                                fig.clf()
+                        
+                        # Plot and log residuals for first horizon
+                        first_pred_data = predictions_dict[f'horizon_{forecast_horizons[0]}']
+                        fig = self.evaluator.plot_residuals(
+                            first_pred_data['actuals'],
+                            first_pred_data['predictions'],
+                            model_name,
+                            self.config['paths']['figures_dir']
+                        )
+                        wandb.log({f"{model_name}_residuals": wandb.Image(fig)})
+                        fig.clf()
+                        
+                    except Exception as e:
+                        print(f"  Warning: Could not log to wandb: {e}")
+                    
+                    wandb.finish()
+                
+                # Save model
+                model_path = os.path.join(
+                    self.config['paths']['models_dir'],
+                    f"{model_name}.pkl"
+                )
+                try:
+                    joblib.dump(trained_model, model_path)
+                    print(f"  Model saved to: {model_path}")
+                except Exception as e:
+                    print(f"  Warning: Could not save model: {e}")
+                
+            except Exception as e:
+                print(f"  Error training {model_name}: {e}")
+                import traceback
+                traceback.print_exc()
+                if use_wandb:
+                    wandb.finish()
+                continue
+        
+        if not self.results:
+            print("\nNo models were successfully trained!")
+            return {}
+        
+        # [4/5] Compare models
+        print("\n[4/5] Comparing models...")
+        print("-" * 80)
+        
+        try:
+            # Compare models at first horizon
+            first_horizon = forecast_horizons[0]
+            comparison_fig = self.evaluator.compare_models(
+                self.results,
+                horizon=first_horizon,
+                save_path=self.config['paths']['figures_dir']
+            )
+            
+            if use_wandb:
+                try:
+                    run = wandb.init(
+                        project=self.config['project']['name'],
+                        entity=self.config['project'].get('entity'),
+                        name="model_comparison",
+                        reinit=True
+                    )
+                    wandb.log({"model_comparison": wandb.Image(comparison_fig)})
+                except:
+                    pass
+            
+            comparison_fig.clf()
+            
+            # Compare models across horizons
+            if len(forecast_horizons) > 1:
+                horizon_comparison_fig = self.evaluator.compare_models_by_horizon(
+                    self.results,
+                    forecast_horizons,
+                    save_path=self.config['paths']['figures_dir']
+                )
+                
+                if use_wandb:
+                    try:
+                        wandb.log({"horizon_comparison": wandb.Image(horizon_comparison_fig)})
+                    except:
+                        pass
+                
+                horizon_comparison_fig.clf()
+            
+            if use_wandb:
+                try:
+                    wandb.finish()
+                except:
+                    pass
+                    
+        except Exception as e:
+            print(f"Warning: Could not create comparison plots: {e}")
+        
+        # [5/5] Save results and determine best model
+        print("\n[5/5] Saving results...")
+        print("-" * 80)
+        
+        save_results(self.results, self.config['paths']['metrics_dir'])
+        
+        # Find best model based on first horizon MAE
+        best_model_name = self._get_best_model(
+            metric=f'test_h{forecast_horizons[0]}_mae',
+            minimize=True
+        )
+        
+        print("\n" + "=" * 80)
+        print(f"PIPELINE COMPLETED!")
+        print("=" * 80)
+        print(f"\nBest Model: {best_model_name}")
+        print(f"Best Model Type: {self.results[best_model_name]['model_type']}")
+        
+        for horizon in forecast_horizons:
+            mae_key = f'test_h{horizon}_mae'
+            rmse_key = f'test_h{horizon}_rmse'
+            if mae_key in self.results[best_model_name]['metrics']:
+                mae = self.results[best_model_name]['metrics'][mae_key]
+                rmse = self.results[best_model_name]['metrics'][rmse_key]
+                print(f"\nHorizon {horizon}:")
+                print(f"  MAE:  {mae:.4f}")
+                print(f"  RMSE: {rmse:.4f}")
+        
+        print("\n" + "=" * 80)
+        
+        return self.results
+    
+    def _get_best_model(self, metric: str = 'test_h1_mae', minimize: bool = True) -> str:
+        """
+        Find the best performing model based on a metric.
+        
+        Args:
+            metric: Metric name to compare
+            minimize: Whether lower values are better
+            
+        Returns:
+            Name of best model
+        """
+        if not self.results:
+            return None
+        
+        valid_models = {
+            name: data['metrics'].get(metric, float('inf') if minimize else float('-inf'))
+            for name, data in self.results.items()
+            if metric in data['metrics']
+        }
+        
+        if not valid_models:
+            return list(self.results.keys())[0]
+        
+        if minimize:
+            best_model = min(valid_models.keys(), key=lambda k: valid_models[k])
+        else:
+            best_model = max(valid_models.keys(), key=lambda k: valid_models[k])
+        
+        return best_model
+    
+    def load_model(self, model_name: str) -> any:
+        """
+        Load a saved model.
+        
+        Args:
+            model_name: Name of the model to load
+            
+        Returns:
+            Loaded model
+        """
+        model_path = os.path.join(
+            self.config['paths']['models_dir'],
+            f"{model_name}.pkl"
+        )
+        return joblib.load(model_path)
+    
+    def predict_with_model(
+        self,
+        model_name: str,
+        steps: int,
+        data: pd.Series = None
+    ) -> np.ndarray:
+        """
+        Make predictions with a saved model.
+        
+        Args:
+            model_name: Name of the model to use
+            steps: Number of steps to forecast
+            data: Optional data to use for prediction (if None, uses test data)
+            
+        Returns:
+            Predictions
+        """
+        model = self.load_model(model_name)
+        
+        if data is not None:
+            model.fit(data.values)
+        
+        return model.predict(steps=steps)
