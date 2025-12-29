@@ -131,6 +131,34 @@ After running the pipeline, results are saved to:
 - **Metrics**: `TimeSeries/results/metrics/results_summary.json`
 - **Figures**: `TimeSeries/results/figures/`
 
+## Latest Results
+
+Below are the latest model comparison results from the time series forecasting pipeline comparing XGBoost and Prophet across multiple forecast horizons.
+
+### Model Comparison by Horizon
+
+<p align="center">
+  <img src="TimeSeries/results/figures/model_comparison_by_horizon.png" alt="Model Comparison by Horizon" width="800"/>
+</p>
+
+Comprehensive comparison of model performance across different forecast horizons (1-day, 7-day, 30-day ahead).
+
+### Single Horizon Performance (H=1)
+
+<p align="center">
+  <img src="TimeSeries/results/figures/model_comparison_h1.png" alt="Model Comparison H1" width="800"/>
+</p>
+
+Detailed performance metrics for 1-step ahead forecasting.
+
+### Test Set Predictions
+
+<p align="center">
+  <img src="TimeSeries/results/figures/test_comparison_all_horizons.png" alt="Test Comparison All Horizons" width="800"/>
+</p>
+
+Visual comparison of actual vs predicted values on the test set across all forecast horizons.
+
 ## Future Work
 
 ### Time Series
