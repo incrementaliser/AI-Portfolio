@@ -69,8 +69,9 @@ models:
       # Default parameters - can be overridden in experiments
       n_estimators: 100
       max_depth: 6
-      learning_rate: 0.3
-      random_state: 42
+      learning_rate: 0.1  # Reduced from 0.3 for better performance
+      random_state: 47
+      seed: 47  # XGBoost seed parameter for reproducibility
     
     lightgbm:
       n_estimators: 100
