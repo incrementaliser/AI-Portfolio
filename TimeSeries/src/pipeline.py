@@ -470,11 +470,10 @@ class TimeSeriesPipeline:
             traceback.print_exc()
         
         try:
-            # Compare models at first horizon
-            first_horizon = forecast_horizons[0]
+            # Compare models across all horizons
             comparison_fig = self.evaluator.compare_models(
                 self.results,
-                horizon=first_horizon,
+                horizons=forecast_horizons,
                 save_path=self.config['paths']['figures_dir']
             )
             

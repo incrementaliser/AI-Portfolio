@@ -9,7 +9,7 @@ import os
 import random
 import numpy as np
 from pathlib import Path
-from typing import Any, List, Dict, Optional
+from typing import List, Dict
 from src.utils import load_config
 from src.pipeline import TimeSeriesPipeline
 
@@ -279,21 +279,6 @@ def main():
         print("No experiments defined!")
         print("=" * 80)
         print("\nPlease define experiments in the EXPERIMENTS list at the top of main.py")
-        print("\nExample:")
-        print("""
-EXPERIMENTS = [
-    {
-        "model": "xgboost",
-    },
-    {
-        "model": "xgboost",
-        "hyperparameters": {
-            "n_estimators": 200,
-            "max_depth": 10
-        }
-    }
-]
-        """)
         sys.exit(1)
     
     print("=" * 80)

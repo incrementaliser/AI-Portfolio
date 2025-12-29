@@ -685,7 +685,7 @@ class TimeSeriesEvaluator:
         if save_path:
             os.makedirs(save_path, exist_ok=True)
             fig.savefig(
-                os.path.join(save_path, 'train_test_comparison_all_horizons.png'),
+                os.path.join(save_path, 'test_comparison_all_horizons.png'),
                 dpi=150,
                 bbox_inches='tight'
             )
@@ -753,49 +753,96 @@ class TimeSeriesEvaluator:
     def compare_models(
         self,
         results_dict: Dict[str, Dict],
-        horizon: int = 1,
+        horizons: List[int] = None,
+        horizon: int = None,
         save_path: str = None
     ) -> plt.Figure:
         """
-        Create comparison bar plots for multiple models at a specific horizon.
+        Create comparison bar plots for multiple models across multiple horizons.
         
         Args:
             results_dict: Dictionary of model results
-            horizon: Forecast horizon to compare
+            horizons: List of forecast horizons to compare (preferred)
+            horizon: Single forecast horizon to compare (for backward compatibility)
             save_path: Path to save figure
             
         Returns:
             Matplotlib figure
         """
+        # Handle backward compatibility: if horizon is provided, convert to list
+        if horizons is None:
+            if horizon is not None:
+                horizons = [horizon]
+            else:
+                horizons = [1]
+        
         model_names = list(results_dict.keys())
         metrics = ['mae', 'rmse', 'mape', 'r2']
         
-        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        fig, axes = plt.subplots(2, 2, figsize=(16, 10))
         axes = axes.ravel()
         
+        # Colors for different horizons
+        horizon_colors = plt.cm.Set2(np.linspace(0, 1, len(horizons)))
+        
         for idx, metric in enumerate(metrics):
-            metric_key = f'test_h{horizon}_{metric}'
-            scores = []
-            valid_models = []
+            ax = axes[idx]
             
+            # Collect data for all models and horizons
+            model_data = {}
             for model_name in model_names:
-                if metric_key in results_dict[model_name]['metrics']:
-                    scores.append(results_dict[model_name]['metrics'][metric_key])
-                    valid_models.append(model_name)
+                model_data[model_name] = []
+                for h in horizons:
+                    metric_key = f'test_h{h}_{metric}'
+                    if metric_key in results_dict[model_name]['metrics']:
+                        model_data[model_name].append(results_dict[model_name]['metrics'][metric_key])
+                    else:
+                        model_data[model_name].append(None)
             
-            if scores:
-                axes[idx].bar(valid_models, scores, alpha=0.7, edgecolor='black')
-                axes[idx].set_ylabel(metric.upper(), fontsize=12)
-                axes[idx].set_title(f'{metric.upper()} (Horizon: {horizon})', fontsize=14)
-                axes[idx].tick_params(axis='x', rotation=45)
-                axes[idx].grid(True, alpha=0.3, axis='y')
+            # Create grouped bar chart
+            x = np.arange(len(model_names))
+            total_width = 0.6  # Total width for all bars in a group
+            width = total_width / len(horizons)  # Width of each bar
+            
+            # Calculate offsets to center bars around each model position
+            for horizon_idx, h in enumerate(horizons):
+                # Offset from center: start from leftmost position and move right
+                offset = (horizon_idx - (len(horizons) - 1) / 2) * width
+                bars_data = []
+                bars_positions = []
+                
+                for model_idx, model_name in enumerate(model_names):
+                    value = model_data[model_name][horizon_idx]
+                    if value is not None:
+                        bars_data.append(value)
+                        bars_positions.append(x[model_idx] + offset)
+                
+                if bars_data:
+                    ax.bar(bars_positions, bars_data, width, 
+                          label=f'H={h}', alpha=0.7, edgecolor='black',
+                          color=horizon_colors[horizon_idx])
+            
+            ax.set_ylabel(metric.upper(), fontsize=12)
+            if len(horizons) == 1:
+                ax.set_title(f'{metric.upper()} (Horizon: {horizons[0]})', fontsize=14)
+            else:
+                ax.set_title(f'{metric.upper()}', fontsize=14)
+            ax.set_xticks(x)
+            ax.set_xticklabels(model_names, rotation=45, ha='right')
+            ax.legend(fontsize=10, loc='best')
+            ax.grid(True, alpha=0.3, axis='y')
         
         plt.tight_layout()
         
         if save_path:
             os.makedirs(save_path, exist_ok=True)
+            if len(horizons) == 1:
+                filename = f'model_comparison_h{horizons[0]}.png'
+            else:
+                # Use first horizon in filename for backward compatibility
+                filename = f'model_comparison_h{horizons[0]}.png'
             fig.savefig(
-                os.path.join(save_path, f'model_comparison_h{horizon}.png'),
+                os.path.join(save_path, filename),
                 dpi=150,
                 bbox_inches='tight'
             )
