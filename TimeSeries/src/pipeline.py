@@ -4,8 +4,10 @@ Time series forecasting pipeline orchestration
 import wandb
 import os
 import joblib
+import random
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from typing import Dict, List, Optional
 from src.data_loader import TimeSeriesDataLoader
 from models.models import TimeSeriesModelFactory
@@ -13,6 +15,11 @@ from src.evaluate import TimeSeriesEvaluator
 from src.utils import setup_directories, save_results
 import warnings
 warnings.filterwarnings('ignore')
+
+# Set random seeds for reproducibility
+RANDOM_SEED = 47
+np.random.seed(RANDOM_SEED)
+random.seed(RANDOM_SEED)
 
 
 class TimeSeriesPipeline:
@@ -232,8 +239,36 @@ class TimeSeriesPipeline:
                                 
                                 if has_all_test_metrics:
                                     print("  Loaded metrics from saved results (including test metrics)")
-                                    # Create empty predictions dict (we have metrics but not predictions)
-                                    predictions_dict = {}
+                                    # Metrics are loaded, but we still need predictions for visualization
+                                    # Re-evaluate to get predictions
+                                    print("  Generating predictions for visualization...")
+                                    try:
+                                        if hasattr(trained_model, '__class__') and 'ProphetWrapper' in trained_model.__class__.__name__:
+                                            print("  Creating fresh Prophet instance for prediction generation...")
+                                            from models.statistical.statistical import ProphetWrapper
+                                            if hasattr(trained_model, 'get_params'):
+                                                prophet_params = trained_model.get_params()
+                                            else:
+                                                prophet_params = getattr(trained_model, 'prophet_params', {})
+                                            fresh_model = ProphetWrapper(**prophet_params)
+                                            _, _, predictions_dict = self.evaluator.evaluate_model(
+                                                fresh_model,
+                                                train_series,
+                                                val_series,
+                                                test_series,
+                                                forecast_horizons=forecast_horizons
+                                            )
+                                        else:
+                                            _, _, predictions_dict = self.evaluator.evaluate_model(
+                                                trained_model,
+                                                train_series,
+                                                val_series,
+                                                test_series,
+                                                forecast_horizons=forecast_horizons
+                                            )
+                                    except Exception as pred_error:
+                                        print(f"  Warning: Could not generate predictions: {pred_error}")
+                                        predictions_dict = {}
                                 else:
                                     print("  Loaded metrics from saved results, but test metrics are missing")
                                     print("  Will re-evaluate to get test metrics...")
@@ -385,6 +420,14 @@ class TimeSeriesPipeline:
                     'model_type': model.model_type if hasattr(model, 'model_type') else (trained_model.model_type if hasattr(trained_model, 'model_type') else 'unknown')
                 }
                 
+                # Debug: print prediction keys
+                print(f"  Stored predictions for {model_name}: {list(predictions_dict.keys())}")
+                for key, pred in predictions_dict.items():
+                    if isinstance(pred, dict):
+                        train_pred_len = len(pred.get('train_predictions', []))
+                        test_pred_len = len(pred.get('test_predictions', []))
+                        print(f"    {key}: train_pred={train_pred_len}, test_pred={test_pred_len}")
+                
                 # Print key metrics for first horizon
                 first_horizon = forecast_horizons[0]
                 print(f"\n  Results for horizon {first_horizon}:")
@@ -405,6 +448,26 @@ class TimeSeriesPipeline:
         # [4/5] Compare models
         print("\n[4/5] Comparing models...")
         print("-" * 80)
+        
+        # Load results from all previously trained models for comparison
+        self._load_previous_results(train_series, val_series, test_series, forecast_horizons)
+        
+        # Create train/test comparison plot with all horizons
+        try:
+            print(f"  Creating train/test comparison plot for all horizons...")
+            comparison_fig = self.evaluator.plot_train_test_comparison(
+                self.results,
+                train_series,
+                test_series,
+                save_path=self.config['paths']['figures_dir'],
+                horizons=forecast_horizons
+            )
+            comparison_fig.clf()
+            plt.close(comparison_fig)
+        except Exception as e:
+            print(f"  Warning: Could not create train/test comparison plot: {e}")
+            import traceback
+            traceback.print_exc()
         
         try:
             # Compare models at first horizon
@@ -492,6 +555,141 @@ class TimeSeriesPipeline:
         print("\n" + "=" * 80)
         
         return self.results
+    
+    def _load_previous_results(
+        self,
+        train_series: pd.Series,
+        val_series: pd.Series,
+        test_series: pd.Series,
+        forecast_horizons: List[int]
+    ):
+        """
+        Load results from previously trained models that are not in the current experiment.
+        
+        This ensures that comparison plots include all trained models, not just
+        models from the current experiment.
+        
+        Args:
+            train_series: Training data series
+            val_series: Validation data series
+            test_series: Test data series
+            forecast_horizons: List of forecast horizons
+        """
+        import json
+        
+        # Check for saved results
+        metrics_file = os.path.join(
+            self.config['paths']['metrics_dir'],
+            'results_summary.json'
+        )
+        metrics_file = os.path.abspath(metrics_file)
+        
+        if not os.path.exists(metrics_file):
+            return
+        
+        try:
+            with open(metrics_file, 'r') as f:
+                saved_results = json.load(f)
+        except Exception as e:
+            print(f"  Could not load saved results: {e}")
+            return
+        
+        # Find models that have saved results but are not in current results
+        models_to_load = [
+            model_name for model_name in saved_results.keys()
+            if model_name not in self.results
+        ]
+        
+        if not models_to_load:
+            return
+        
+        print(f"  Loading {len(models_to_load)} previously trained model(s) for comparison: {models_to_load}")
+        
+        for model_name in models_to_load:
+            model_path = os.path.join(
+                self.config['paths']['models_dir'],
+                f"{model_name}.pkl"
+            )
+            model_path = os.path.abspath(model_path)
+            
+            if not os.path.exists(model_path):
+                print(f"    Skipping {model_name}: model file not found")
+                continue
+            
+            try:
+                # Load the saved model
+                trained_model = joblib.load(model_path)
+                saved_metrics = saved_results[model_name].get('metrics', {})
+                
+                # Generate predictions for visualization
+                predictions_dict = {}
+                combined_train = pd.concat([train_series, val_series])
+                
+                for horizon in forecast_horizons:
+                    try:
+                        # Check model type and handle appropriately
+                        if hasattr(trained_model, '__class__'):
+                            class_name = trained_model.__class__.__name__
+                            if 'ProphetWrapper' in class_name:
+                                # Create fresh Prophet instance
+                                from models.statistical.statistical import ProphetWrapper
+                                if hasattr(trained_model, 'get_params'):
+                                    prophet_params = trained_model.get_params()
+                                else:
+                                    prophet_params = getattr(trained_model, 'prophet_params', {})
+                                fresh_model = ProphetWrapper(**prophet_params)
+                                fresh_model.fit(combined_train)
+                                test_pred = fresh_model.predict(steps=min(horizon, len(test_series)))
+                            elif 'DartsModelWrapper' in class_name:
+                                # Create fresh Darts instance
+                                from models.neural.deep_learning import DartsModelWrapper
+                                if hasattr(trained_model, 'model_class') and hasattr(trained_model, 'input_chunk_length'):
+                                    fresh_model = DartsModelWrapper(
+                                        model_class=trained_model.model_class,
+                                        input_chunk_length=trained_model.input_chunk_length,
+                                        output_chunk_length=trained_model.output_chunk_length,
+                                        **getattr(trained_model, 'model_params', {})
+                                    )
+                                    fresh_model.fit(combined_train)
+                                    test_pred = fresh_model.predict(steps=min(horizon, len(test_series)))
+                                else:
+                                    trained_model.fit(combined_train)
+                                    test_pred = trained_model.predict(steps=min(horizon, len(test_series)))
+                            else:
+                                # ML models - refit with combined data
+                                trained_model.fit(combined_train.values)
+                                test_pred = trained_model.predict(steps=min(horizon, len(test_series)))
+                        else:
+                            trained_model.fit(combined_train.values)
+                            test_pred = trained_model.predict(steps=min(horizon, len(test_series)))
+                        
+                        test_actual = test_series.values[:len(test_pred)]
+                        
+                        predictions_dict[f'horizon_{horizon}'] = {
+                            'test_predictions': test_pred,
+                            'test_actuals': test_actual,
+                            'train_predictions': np.array([]),
+                            'train_actuals': train_series.values
+                        }
+                    except Exception as e:
+                        print(f"    Warning: Could not generate predictions for {model_name} horizon {horizon}: {e}")
+                        continue
+                
+                # Add to results if predictions were generated
+                if predictions_dict:
+                    self.results[model_name] = {
+                        'model': trained_model,
+                        'metrics': saved_metrics,
+                        'predictions': predictions_dict,
+                        'model_type': getattr(trained_model, 'model_type', 'unknown')
+                    }
+                    print(f"    Loaded {model_name} with predictions for horizons: {list(predictions_dict.keys())}")
+                else:
+                    print(f"    Warning: Could not generate any predictions for {model_name}")
+                    
+            except Exception as e:
+                print(f"    Error loading {model_name}: {e}")
+                continue
     
     def _get_best_model(self, metric: str = 'test_h1_mae', minimize: bool = True) -> str:
         """

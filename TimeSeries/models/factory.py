@@ -1,10 +1,16 @@
 """
 Factory for creating time series models
 """
-
+import numpy as np
+import random
 from typing import Dict
 import warnings
 warnings.filterwarnings('ignore')
+
+# Set random seeds for reproducibility
+RANDOM_SEED = 47
+np.random.seed(RANDOM_SEED)
+random.seed(RANDOM_SEED)
 
 from models.base import BaseTimeSeriesModel
 from models.statistical.statistical import ARIMAWrapper, ProphetWrapper, ETSWrapper, ThetaWrapper
@@ -65,27 +71,33 @@ class TimeSeriesModelFactory:
             lookback = config.get('data', {}).get('lookback_window', 10)
             
             if 'random_forest' in ml_config:
-                params = ml_config['random_forest']
+                params = ml_config['random_forest'].copy()
+                params['random_state'] = params.get('random_state', RANDOM_SEED)
                 model = RandomForestRegressor(**params)
                 models['RandomForest'] = MLTimeSeriesWrapper(model, lookback=lookback)
             
             if 'gradient_boosting' in ml_config:
-                params = ml_config['gradient_boosting']
+                params = ml_config['gradient_boosting'].copy()
+                params['random_state'] = params.get('random_state', RANDOM_SEED)
                 model = GradientBoostingRegressor(**params)
                 models['GradientBoosting'] = MLTimeSeriesWrapper(model, lookback=lookback)
             
             if 'xgboost' in ml_config:
-                params = ml_config['xgboost']
+                params = ml_config['xgboost'].copy()
+                params['random_state'] = params.get('random_state', RANDOM_SEED)
+                # XGBoost needs seed parameter for reproducibility
+                params['seed'] = params.get('seed', params.get('random_state', RANDOM_SEED))
                 model = xgb.XGBRegressor(**params)
                 models['XGBoost'] = MLTimeSeriesWrapper(model, lookback=lookback)
             
             if 'lightgbm' in ml_config:
-                params = ml_config['lightgbm']
+                params = ml_config['lightgbm'].copy()
+                params['random_state'] = params.get('random_state', RANDOM_SEED)
                 model = lgb.LGBMRegressor(**params)
                 models['LightGBM'] = MLTimeSeriesWrapper(model, lookback=lookback)
             
             if 'ridge' in ml_config:
-                params = ml_config['ridge']
+                params = ml_config['ridge'].copy()
                 model = Ridge(**params)
                 models['Ridge'] = MLTimeSeriesWrapper(model, lookback=lookback)
         

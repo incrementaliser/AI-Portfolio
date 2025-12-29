@@ -6,10 +6,17 @@ Each experiment specifies which model(s) to run and optional hyperparameter over
 """
 import sys
 import os
+import random
+import numpy as np
 from pathlib import Path
 from typing import Any, List, Dict, Optional
 from src.utils import load_config
 from src.pipeline import TimeSeriesPipeline
+
+# Set random seeds for reproducibility
+RANDOM_SEED = 47
+np.random.seed(RANDOM_SEED)
+random.seed(RANDOM_SEED)
 
 # Get the directory where this script is located
 SCRIPT_DIR = Path(__file__).parent.absolute()

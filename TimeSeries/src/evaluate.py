@@ -1,6 +1,7 @@
 """
 Time series model evaluation module
 """
+import random
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -10,6 +11,11 @@ import wandb
 import os
 import warnings
 warnings.filterwarnings('ignore')
+
+# Set random seeds for reproducibility
+RANDOM_SEED = 47
+np.random.seed(RANDOM_SEED)
+random.seed(RANDOM_SEED)
 
 
 class TimeSeriesEvaluator:
@@ -349,6 +355,26 @@ class TimeSeriesEvaluator:
             traceback.print_exc()
             return {}, model, {}
         
+        # Get train predictions (fitted values) before refitting for test
+        # For training visualization, we want in-sample predictions (fitted values)
+        # Not future predictions - we want to see how well the model fits the training data
+        train_predictions_by_horizon = {}
+        print("  Getting in-sample predictions for training data...")
+        
+        # For time series, we'll use the first horizon as representative for train visualization
+        # since we're showing how well the model learned the training data pattern
+        try:
+            # Get fitted values by predicting on the training data itself
+            # This is different from forecasting - we want to see model's understanding of train data
+            # For now, store empty - we'll handle this differently per model type
+            for horizon in forecast_horizons:
+                train_predictions_by_horizon[horizon] = {
+                    'train_predictions': np.array([]),  # Will be filled later if possible
+                    'train_actuals': train_data.values
+                }
+        except Exception as e:
+            pass
+        
         # Evaluate on validation set
         print("  Evaluating on validation set...")
         for horizon in forecast_horizons:
@@ -404,6 +430,14 @@ class TimeSeriesEvaluator:
                             # Fallback: try to refit (may fail)
                             model.fit(combined_train)
                             test_pred = model.predict(steps=min(horizon, len(test_data)))
+                    elif 'MLTimeSeriesWrapper' in class_name:
+                        # ML models need to be refit, but ensure clean state
+                        # Get model parameters to recreate if needed
+                        from models.ml.ml_models import MLTimeSeriesWrapper
+                        from models.factory import TimeSeriesModelFactory
+                        # Refit on combined data
+                        model.fit(combined_train.values)
+                        test_pred = model.predict(steps=min(horizon, len(test_data)))
                     else:
                         # Other models can be refit
                         model.fit(combined_train.values)
@@ -422,9 +456,19 @@ class TimeSeriesEvaluator:
                 )
                 results.update(test_metrics)
                 
+                # Get train predictions that we stored earlier
+                # Note: For time series forecasting, "train predictions" showing fitted values
+                # is not straightforward - we're showing test predictions which is more meaningful
+                train_data_for_horizon = train_predictions_by_horizon.get(horizon, {
+                    'train_predictions': np.array([]),
+                    'train_actuals': train_data.values
+                })
+                
                 predictions_dict[f'horizon_{horizon}'] = {
-                    'predictions': test_pred,
-                    'actuals': test_actual
+                    'test_predictions': test_pred,
+                    'test_actuals': test_actual,
+                    'train_predictions': train_data_for_horizon['train_predictions'],
+                    'train_actuals': train_data_for_horizon['train_actuals']
                 }
             except Exception as e:
                 print(f"  Warning: Test failed for horizon {horizon}: {e}")
@@ -558,6 +602,90 @@ class TimeSeriesEvaluator:
             os.makedirs(save_path, exist_ok=True)
             fig.savefig(
                 os.path.join(save_path, f'{model_name}_residuals.png'),
+                dpi=150,
+                bbox_inches='tight'
+            )
+        
+        return fig
+    
+    def plot_train_test_comparison(
+        self,
+        results: Dict,
+        train_data: pd.Series,
+        test_data: pd.Series,
+        save_path: str = None,
+        horizons: List[int] = [1]
+    ) -> plt.Figure:
+        """
+        Plot test predictions for all models and all horizons.
+        Note: Train data is shown for context, but fitted values are not shown
+        as they're not meaningful for multi-step-ahead forecasting models.
+        
+        Args:
+            results: Dictionary of model results with predictions
+            train_data: Training data series (for context)
+            test_data: Test data series
+            save_path: Path to save figure
+            horizons: List of forecast horizons to plot
+            
+        Returns:
+            Matplotlib figure
+        """
+        n_horizons = len(horizons)
+        # Just one row for test predictions
+        fig, axes = plt.subplots(1, n_horizons, figsize=(6 * n_horizons, 6))
+        
+        # Handle case where there's only one horizon
+        if n_horizons == 1:
+            axes = [axes]
+        
+        # Colors for different models
+        colors = plt.cm.tab10(np.linspace(0, 1, len(results)))
+        
+        # Plot for each horizon
+        for col_idx, horizon in enumerate(horizons):
+            ax = axes[col_idx]
+            ax.set_title(f'Test Set Predictions (Horizon: {horizon} steps)', 
+                        fontsize=12, fontweight='bold')
+            
+            # Plot actual test data
+            test_indices = np.arange(len(test_data))
+            ax.plot(test_indices, test_data.values, 'k-', label='Actual', 
+                   linewidth=2.5, alpha=0.8, zorder=1)
+            
+            # Plot predictions for each model
+            for idx, (model_name, result_data) in enumerate(results.items()):
+                predictions = result_data.get('predictions', {})
+                horizon_key = f'horizon_{horizon}'
+                
+                if horizon_key in predictions:
+                    pred_data = predictions[horizon_key]
+                    test_pred = pred_data.get('test_predictions', np.array([]))
+                    
+                    if len(test_pred) > 0:
+                        # Ensure same length
+                        min_len = min(len(test_pred), len(test_data))
+                        test_pred = test_pred[:min_len]
+                        
+                        ax.plot(test_indices[:min_len], test_pred, 
+                               's-', label=f'{model_name}', 
+                               linewidth=1.5, markersize=4, alpha=0.7, 
+                               color=colors[idx], zorder=2)
+            
+            ax.set_xlabel('Time Step', fontsize=10)
+            if col_idx == 0:
+                ax.set_ylabel('Value', fontsize=10)
+                ax.legend(loc='best', fontsize=9, ncol=1)
+            ax.grid(True, alpha=0.3)
+        
+        plt.suptitle('Test Predictions Comparison Across All Horizons', 
+                    fontsize=14, fontweight='bold', y=0.98)
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        
+        if save_path:
+            os.makedirs(save_path, exist_ok=True)
+            fig.savefig(
+                os.path.join(save_path, 'train_test_comparison_all_horizons.png'),
                 dpi=150,
                 bbox_inches='tight'
             )
