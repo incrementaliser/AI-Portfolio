@@ -356,15 +356,10 @@ def compare_experiment_results(experiments: List[Dict], results: List[bool]):
     from pathlib import Path
     
     # Load metrics from saved results
-    # Try multiple possible locations where results might be saved
-    possible_paths = [
-        SCRIPT_DIR / "results" / "metrics" / "results_summary.json",
-        Path("results/metrics/results_summary.json").resolve(),
-        Path.cwd() / "results" / "metrics" / "results_summary.json",
-        Path(os.path.abspath("results/metrics/results_summary.json")),
-    ]
+    # Use paths relative to TimeSeries directory (SCRIPT_DIR)
+    possible_paths = []
     
-    # Also try to get path from config
+    # Get path from config (preferred method)
     try:
         config_path = experiments[0].get('config', 'configs/config.yaml')
         if not os.path.isabs(config_path):
@@ -372,15 +367,16 @@ def compare_experiment_results(experiments: List[Dict], results: List[bool]):
         config = load_config(config_path)
         metrics_dir = config.get('paths', {}).get('metrics_dir', 'results/metrics/')
         
-        # Resolve path - could be relative to script dir or cwd
+        # Resolve path relative to script directory
         if not os.path.isabs(metrics_dir):
-            # Try both script dir and cwd
-            possible_paths.insert(0, Path(SCRIPT_DIR / metrics_dir) / "results_summary.json")
-            possible_paths.insert(1, Path(os.path.abspath(metrics_dir)) / "results_summary.json")
+            possible_paths.append(Path(SCRIPT_DIR / metrics_dir) / "results_summary.json")
         else:
-            possible_paths.insert(0, Path(metrics_dir) / "results_summary.json")
+            possible_paths.append(Path(metrics_dir) / "results_summary.json")
     except Exception as e:
-        pass  # Use fallback paths
+        pass  # Use fallback path
+    
+    # Fallback: use default path relative to script directory
+    possible_paths.append(SCRIPT_DIR / "results" / "metrics" / "results_summary.json")
     
     metrics_file = None
     for path in possible_paths:
@@ -535,8 +531,8 @@ def compare_experiment_results(experiments: List[Dict], results: List[bool]):
                     print(f"  MASE:  {best_mase[0]:<15} ({best_mase[1]['mase']:.4f})")
         
         print("\n" + "=" * 100)
-        print("Note: Full results saved to: results/metrics/results_summary.json")
-        print("      Visualizations saved to: results/figures/")
+        print(f"Note: Full results saved to: {SCRIPT_DIR / 'results' / 'metrics' / 'results_summary.json'}")
+        print(f"      Visualizations saved to: {SCRIPT_DIR / 'results' / 'figures'}")
         print("=" * 100)
         
     except Exception as e:
