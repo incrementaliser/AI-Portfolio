@@ -104,3 +104,4 @@ def print_config(config: dict) -> None:
     print(yaml.dump(config, default_flow_style=False))
     print("=" * 60)
 
+

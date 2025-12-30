@@ -1,7 +1,8 @@
 """
 NLP classification pipeline orchestration
 """
-import wandb
+import mlflow
+import mlflow.sklearn
 import os
 import joblib
 import random
@@ -60,7 +61,7 @@ class NLPClassificationPipeline:
         self,
         data_path: str = None,
         model_names: List[str] = None,
-        use_wandb: bool = False
+        use_mlflow: bool = False
     ) -> Dict:
         """
         Execute the complete NLP classification pipeline.
@@ -68,7 +69,7 @@ class NLPClassificationPipeline:
         Args:
             data_path: Path pattern for review files
             model_names: List of specific model names to run (e.g., ['logistic_regression', 'naive_bayes_multinomial'])
-            use_wandb: Whether to use Weights & Biases logging
+            use_mlflow: Whether to use MLflow logging
             
         Returns:
             Dictionary containing results for all models
@@ -186,19 +187,31 @@ class NLPClassificationPipeline:
             
             # Train new model if not loaded or loading failed
             if not model_loaded:
-                if use_wandb:
-                    # Initialize wandb run for this model
+                if use_mlflow:
+                    # Initialize MLflow run for this model
                     try:
-                        run = wandb.init(
-                            project=self.config['project']['name'],
-                            entity=self.config['project'].get('entity'),
-                            name=f"{model_name}",
-                            config=NLPModelFactory.get_model_params(model),
-                            reinit=True
-                        )
+                        # Set tracking URI if specified in config
+                        tracking_uri = self.config.get('mlflow', {}).get('tracking_uri', None)
+                        if tracking_uri:
+                            mlflow.set_tracking_uri(tracking_uri)
+                        
+                        # Set experiment name
+                        experiment_name = self.config['project']['name']
+                        try:
+                            mlflow.set_experiment(experiment_name)
+                        except Exception:
+                            # Experiment might already exist, which is fine
+                            pass
+                        
+                        # Start MLflow run
+                        mlflow.start_run(run_name=f"{model_name}")
+                        
+                        # Log model parameters
+                        model_params = NLPModelFactory.get_model_params(model)
+                        mlflow.log_params(model_params)
                     except Exception as e:
-                        print(f"  Warning: Could not initialize wandb: {e}")
-                        use_wandb = False
+                        print(f"  Warning: Could not initialize MLflow: {e}")
+                        use_mlflow = False
                 
                 try:
                     # Evaluate model
@@ -210,8 +223,8 @@ class NLPClassificationPipeline:
                     
                     if not metrics:
                         print(f"  Skipping {model_name} due to evaluation errors")
-                        if use_wandb:
-                            wandb.finish()
+                        if use_mlflow:
+                            mlflow.end_run()
                         continue
                     
                     # Save newly trained model
@@ -221,13 +234,28 @@ class NLPClassificationPipeline:
                     except Exception as e:
                         print(f"  Warning: Could not save model: {e}")
                     
-                    # Log to wandb for newly trained models
-                    if use_wandb:
+                    # Log to MLflow for newly trained models
+                    if use_mlflow:
                         try:
                             # Log metrics
                             for key, value in metrics.items():
                                 if isinstance(value, (int, float)):
-                                    wandb.log({key: value})
+                                    mlflow.log_metric(key, value)
+                            
+                            # Log model artifact
+                            # Note: registered_model_name requires MLflow Model Registry (optional)
+                            try:
+                                mlflow.sklearn.log_model(
+                                    trained_model,
+                                    artifact_path="model",
+                                    registered_model_name=f"{model_name}"
+                                )
+                            except Exception:
+                                # If model registry is not available, just log the model without registration
+                                mlflow.sklearn.log_model(
+                                    trained_model,
+                                    artifact_path="model"
+                                )
                             
                             # Log confusion matrix
                             if 'test' in predictions_dict:
@@ -236,7 +264,12 @@ class NLPClassificationPipeline:
                                 fig = self.evaluator.plot_confusion_matrix(
                                     test_actual, test_pred, model_name
                                 )
-                                wandb.log({f"{model_name}_confusion_matrix": wandb.Image(fig)})
+                                # Save figure temporarily for MLflow
+                                cm_path = os.path.join(self.config['paths']['figures_dir'], 
+                                                      f"{model_name}_confusion_matrix_temp.png")
+                                fig.savefig(cm_path)
+                                mlflow.log_artifact(cm_path, "figures")
+                                os.remove(cm_path)  # Clean up temp file
                                 fig.clf()
                             
                             # Log ROC curve if probabilities available
@@ -246,20 +279,27 @@ class NLPClassificationPipeline:
                                 fig = self.evaluator.plot_roc_curve(
                                     test_actual, test_proba, model_name
                                 )
-                                wandb.log({f"{model_name}_roc_curve": wandb.Image(fig)})
+                                # Save figure temporarily for MLflow
+                                roc_path = os.path.join(self.config['paths']['figures_dir'],
+                                                       f"{model_name}_roc_curve_temp.png")
+                                fig.savefig(roc_path)
+                                mlflow.log_artifact(roc_path, "figures")
+                                os.remove(roc_path)  # Clean up temp file
                                 fig.clf()
                             
                         except Exception as e:
-                            print(f"  Warning: Could not log to wandb: {e}")
+                            print(f"  Warning: Could not log to MLflow: {e}")
+                            import traceback
+                            traceback.print_exc()
                         
-                        wandb.finish()
+                        mlflow.end_run()
                         
                 except Exception as e:
                     print(f"  Error training {model_name}: {e}")
                     import traceback
                     traceback.print_exc()
-                    if use_wandb:
-                        wandb.finish()
+                    if use_mlflow:
+                        mlflow.end_run()
                     continue
             
             # Store results (for both loaded and newly trained models)
@@ -435,4 +475,5 @@ class NLPClassificationPipeline:
         X = self.data_loader.vectorize_texts(processed_texts, fit=False)
         
         return model.predict(X)
+
 

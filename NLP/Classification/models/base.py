@@ -66,3 +66,4 @@ class BaseNLPModel(ABC):
             return self.model.get_params()
         return {}
 
+

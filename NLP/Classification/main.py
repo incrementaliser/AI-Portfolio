@@ -38,7 +38,7 @@ DATA_CONFIG = {
 # Each experiment specifies:
 # - model: Name of model to run (e.g., "logistic_regression", "naive_bayes_multinomial")
 # - hyperparameters: Optional dict to override config.yaml hyperparameters
-# - use_wandb: Whether to log to wandb (default: False)
+# - use_mlflow: Whether to log to MLflow (default: False)
 # - quiet: Reduce output verbosity (default: False)
 
 EXPERIMENTS: List[Dict] = [
@@ -186,7 +186,7 @@ def run_experiment(experiment: Dict, experiment_num: int = 1, total: int = 1) ->
         print(f"  Model(s): {experiment.get('model')}")
         if hyperparameters:
             print(f"  Hyperparameter overrides: {hyperparameters}")
-        print(f"  Wandb: {experiment.get('use_wandb', False)}")
+        print(f"  MLflow: {experiment.get('use_mlflow', False)}")
         print("-" * 80)
     
     # Determine which models to enable in config (disable others)
@@ -207,7 +207,7 @@ def run_experiment(experiment: Dict, experiment_num: int = 1, total: int = 1) ->
         results = pipeline.run(
             data_path=DATA_CONFIG['data_path'],
             model_names=models_to_run,
-            use_wandb=experiment.get('use_wandb', False)
+            use_mlflow=experiment.get('use_mlflow', False)
         )
         
         # Restore original config

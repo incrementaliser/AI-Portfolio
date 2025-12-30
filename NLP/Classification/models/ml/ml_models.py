@@ -4,7 +4,6 @@ Machine learning models for NLP classification
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.naive_bayes import MultinomialNB, BernoulliNB, GaussianNB
-from typing import Dict, Any
 from models.base import BaseNLPModel
 
 
@@ -205,4 +204,5 @@ class GaussianNBModel(BaseNLPModel):
         if hasattr(X, 'toarray'):
             X = X.toarray()
         return self.model.predict_proba(X)
+
 
