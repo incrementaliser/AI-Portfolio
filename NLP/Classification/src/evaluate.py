@@ -350,6 +350,161 @@ class NLPEvaluator:
         
         return fig
     
+    def plot_all_confusion_matrices(
+        self,
+        results_dict: Dict[str, Dict],
+        save_path: str = None
+    ) -> plt.Figure:
+        """
+        Plot confusion matrices for all models in a single figure with subplots.
+        
+        Args:
+            results_dict: Dictionary of model results with predictions
+            save_path: Path to save figure
+            
+        Returns:
+            Matplotlib figure with all confusion matrices
+        """
+        model_names = []
+        confusion_matrices = []
+        
+        # Collect confusion matrices for all models
+        for model_name, result_data in results_dict.items():
+            if 'test' in result_data.get('predictions', {}):
+                pred_data = result_data['predictions']['test']
+                y_true = pred_data['actuals']
+                y_pred = pred_data['predictions']
+                
+                cm = confusion_matrix(y_true, y_pred)
+                confusion_matrices.append(cm)
+                model_names.append(model_name)
+        
+        if not confusion_matrices:
+            # Return empty figure if no data
+            fig, ax = plt.subplots(figsize=(8, 6))
+            ax.text(0.5, 0.5, 'No confusion matrices available', 
+                   ha='center', va='center', transform=ax.transAxes)
+            return fig
+        
+        # Create subplots - arrange in a grid with max 4 columns
+        n_models = len(confusion_matrices)
+        n_cols = min(4, n_models)  # Max 4 columns (rows of 4)
+        n_rows = (n_models + n_cols - 1) // n_cols  # Ceiling division
+        
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4.5 * n_rows))
+        if n_models == 1:
+            axes = [axes]
+        elif n_rows == 1:
+            axes = axes if isinstance(axes, np.ndarray) else [axes]
+        else:
+            axes = axes.flatten()
+        
+        # Plot each confusion matrix
+        for idx, (model_name, cm) in enumerate(zip(model_names, confusion_matrices)):
+            ax = axes[idx]
+            
+            im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+            ax.figure.colorbar(im, ax=ax)
+            
+            # Add text annotations
+            thresh = cm.max() / 2.
+            for i in range(cm.shape[0]):
+                for j in range(cm.shape[1]):
+                    ax.text(j, i, format(cm[i, j], 'd'),
+                           ha="center", va="center",
+                           color="white" if cm[i, j] > thresh else "black",
+                           fontsize=12, fontweight='bold')
+            
+            ax.set(xticks=np.arange(cm.shape[1]),
+                   yticks=np.arange(cm.shape[0]),
+                   xticklabels=['Negative', 'Positive'],
+                   yticklabels=['Negative', 'Positive'],
+                   title=f'{model_name}',
+                   ylabel='True Label',
+                   xlabel='Predicted Label')
+            ax.tick_params(labelsize=10)
+        
+        # Hide unused subplots
+        for idx in range(n_models, len(axes)):
+            axes[idx].axis('off')
+        
+        plt.suptitle('Confusion Matrices - All Models', fontsize=16, fontweight='bold', y=0.995)
+        plt.tight_layout(rect=[0, 0, 1, 0.98])
+        
+        if save_path:
+            os.makedirs(save_path, exist_ok=True)
+            fig.savefig(
+                os.path.join(save_path, 'all_confusion_matrices.png'),
+                dpi=150,
+                bbox_inches='tight'
+            )
+        
+        return fig
+    
+    def plot_all_roc_curves(
+        self,
+        results_dict: Dict[str, Dict],
+        save_path: str = None
+    ) -> plt.Figure:
+        """
+        Plot ROC curves for all models in a single figure.
+        
+        Args:
+            results_dict: Dictionary of model results with predictions
+            save_path: Path to save figure
+            
+        Returns:
+            Matplotlib figure with all ROC curves
+        """
+        fig, ax = plt.subplots(figsize=(10, 8))
+        
+        # Color palette for different models
+        colors = plt.cm.tab10(np.linspace(0, 1, len(results_dict)))
+        
+        # Plot ROC curve for each model
+        for idx, (model_name, result_data) in enumerate(results_dict.items()):
+            if 'test' in result_data.get('predictions', {}):
+                pred_data = result_data['predictions']['test']
+                y_true = pred_data['actuals']
+                y_pred_proba = pred_data.get('probabilities')
+                
+                if y_pred_proba is not None:
+                    try:
+                        fpr, tpr, _ = roc_curve(y_true, y_pred_proba[:, 1])
+                        roc_auc = roc_auc_score(y_true, y_pred_proba[:, 1])
+                        
+                        ax.plot(fpr, tpr, 
+                               color=colors[idx], 
+                               lw=2, 
+                               label=f'{model_name} (AUC = {roc_auc:.3f})',
+                               alpha=0.8)
+                    except Exception as e:
+                        print(f"  Warning: Could not plot ROC curve for {model_name}: {e}")
+        
+        # Plot diagonal line (random classifier)
+        ax.plot([0, 1], [0, 1], color='gray', lw=2, linestyle='--', 
+               label='Random Classifier', alpha=0.5)
+        
+        ax.set_xlim([0.0, 1.0])
+        ax.set_ylim([0.0, 1.05])
+        ax.set_xlabel('False Positive Rate', fontsize=12)
+        ax.set_ylabel('True Positive Rate', fontsize=12)
+        ax.set_title('ROC Curves - All Models', fontsize=14, fontweight='bold')
+        ax.legend(loc="lower right", fontsize=10, framealpha=0.9)
+        ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        
+        if save_path:
+            os.makedirs(save_path, exist_ok=True)
+            fig.savefig(
+                os.path.join(save_path, 'all_roc_curves.png'),
+                dpi=150,
+                bbox_inches='tight'
+            )
+        
+        return fig
+    
     def compare_models(
         self,
         results_dict: Dict[str, Dict],

@@ -1,16 +1,22 @@
 """
-NLP classification pipeline orchestration
+NLP classification pipeline orchestration.
+
+Supports:
+- Traditional ML models (using TF-IDF features)
+- Transformer-based LM models (using raw text, fine-tuning)
+- Prompt-based LLM models (using raw text, zero-shot/few-shot/CoT)
 """
 import mlflow
 import mlflow.sklearn
 import os
+import json
 import joblib
 import random
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from src.data_loader import NLPDataLoader
-from models.models import NLPModelFactory
+from models.factory import NLPModelFactory
 from src.evaluate import NLPEvaluator
 from src.utils import setup_directories, save_results
 import warnings
@@ -23,7 +29,37 @@ random.seed(RANDOM_SEED)
 
 
 class NLPClassificationPipeline:
-    """Main pipeline for NLP classification model comparison."""
+    """
+    Main pipeline for NLP classification model comparison.
+    
+    Supports:
+    - Traditional ML models (Logistic Regression, Naive Bayes)
+    - Transformer-based LM models (BERT, DistilBERT)
+    - Prompt-based LLM models (Zero-shot, Few-shot, Chain-of-Thought)
+    """
+    
+    # Model name mapping from config keys to display names
+    MODEL_NAME_MAPPING = {
+        # ML models
+        'logistic_regression': 'LogisticRegression',
+        'naive_bayes_multinomial': 'MultinomialNB',
+        'naive_bayes_bernoulli': 'BernoulliNB',
+        'naive_bayes_gaussian': 'GaussianNB',
+        # LM models (fine-tuning)
+        'bert_base': 'BERT',
+        'distilbert': 'DistilBERT',
+        'roberta_base': 'RoBERTa',
+        # Prompting models
+        'zero_shot_mistral': 'ZeroShot_Mistral',
+        'few_shot_mistral': 'FewShot_Mistral',
+        'cot_mistral': 'CoT_Mistral',
+        'zero_shot_phi3': 'ZeroShot_Phi3',
+        'few_shot_phi3': 'FewShot_Phi3',
+        'cot_phi3': 'CoT_Phi3',
+        'zero_shot': 'ZeroShot',
+        'few_shot': 'FewShot',
+        'chain_of_thought': 'ChainOfThought',
+    }
     
     def __init__(self, config: Dict):
         """
@@ -38,8 +74,9 @@ class NLPClassificationPipeline:
         self.data_loader = NLPDataLoader(config)
         self.evaluator = NLPEvaluator(config)
         self.results = {}
+        self._data_cache = None  # Cache for loaded data
     
-    def _resolve_paths(self):
+    def _resolve_paths(self) -> None:
         """Resolve all paths in config to absolute paths relative to script location."""
         import sys
         from pathlib import Path
@@ -57,6 +94,146 @@ class NLPClassificationPipeline:
                 else:
                     self.config['paths'][path_key] = os.path.abspath(path)
     
+    def _is_lm_model(self, model: Any) -> bool:
+        """
+        Check if a model requires raw text input (LM or prompting model).
+        
+        Args:
+            model: Model instance
+            
+        Returns:
+            True if the model requires raw text (LM or prompting model)
+        """
+        if not hasattr(model, 'model_type'):
+            return False
+        return model.model_type.startswith('lm') or model.model_type.startswith('prompting')
+    
+    def _is_prompting_model(self, model: Any) -> bool:
+        """
+        Check if a model is a prompting model (zero-shot, few-shot, CoT).
+        
+        Args:
+            model: Model instance
+            
+        Returns:
+            True if the model is a prompting model
+        """
+        return hasattr(model, 'model_type') and model.model_type.startswith('prompting')
+    
+    def _train_lm_model(
+        self,
+        model: Any,
+        train_texts: List[str],
+        y_train: np.ndarray,
+        val_texts: List[str],
+        y_val: np.ndarray,
+        test_texts: List[str],
+        y_test: np.ndarray
+    ) -> tuple:
+        """
+        Train and evaluate a language model or prompting model.
+        
+        For transformer models (BERT, etc.): Fine-tunes the model
+        For prompting models: Selects examples (few-shot) or no training (zero-shot)
+        
+        Args:
+            model: LM or prompting model instance
+            train_texts: Training texts (raw)
+            y_train: Training labels
+            val_texts: Validation texts (raw)
+            y_val: Validation labels
+            test_texts: Test texts (raw)
+            y_test: Test labels
+            
+        Returns:
+            Tuple of (metrics_dict, trained_model, predictions_dict)
+        """
+        is_prompting = self._is_prompting_model(model)
+        
+        if is_prompting:
+            print("  Setting up prompting model...")
+        else:
+            print("  Training transformer model (this may take a while)...")
+        
+        # Train the model with validation data
+        model.fit(train_texts, y_train, val_texts, y_val)
+        
+        # Get predictions
+        print("  Generating predictions...")
+        predictions_dict = {}
+        
+        # Validation predictions
+        val_pred = model.predict(val_texts)
+        val_pred_proba = model.predict_proba(val_texts)
+        predictions_dict['val'] = {
+            'predictions': val_pred,
+            'probabilities': val_pred_proba,
+            'actuals': y_val
+        }
+        
+        # Test predictions
+        test_pred = model.predict(test_texts)
+        test_pred_proba = model.predict_proba(test_texts)
+        predictions_dict['test'] = {
+            'predictions': test_pred,
+            'probabilities': test_pred_proba,
+            'actuals': y_test
+        }
+        
+        # Calculate metrics
+        print("  Calculating metrics...")
+        metrics = {}
+        
+        # Validation metrics
+        val_metrics = self.evaluator.calculate_all_metrics(
+            y_val, val_pred, val_pred_proba, prefix='val'
+        )
+        metrics.update(val_metrics)
+        
+        # Test metrics
+        test_metrics = self.evaluator.calculate_all_metrics(
+            y_test, test_pred, test_pred_proba, prefix='test'
+        )
+        metrics.update(test_metrics)
+        
+        return metrics, model, predictions_dict
+    
+    def _save_lm_model(self, model: Any, model_name: str, model_path: str) -> None:
+        """
+        Save an LM model to disk.
+        
+        Args:
+            model: LM model instance
+            model_name: Display name of the model
+            model_path: Path to save the model (used as base for directory)
+        """
+        # LM models save to a directory, not a single file
+        lm_model_dir = model_path.replace('.pkl', '')
+        model.save(lm_model_dir)
+        
+        # Also save a marker file for compatibility
+        with open(model_path, 'w') as f:
+            json.dump({'type': 'lm', 'path': lm_model_dir}, f)
+    
+    def _load_lm_model(self, model: Any, model_path: str) -> Any:
+        """
+        Load an LM model from disk.
+        
+        Args:
+            model: LM model instance (for type reference)
+            model_path: Path to the model marker file
+            
+        Returns:
+            Loaded model instance
+        """
+        # Read the marker file to get the actual model directory
+        with open(model_path, 'r') as f:
+            marker = json.load(f)
+        
+        lm_model_dir = marker.get('path', model_path.replace('.pkl', ''))
+        model.load(lm_model_dir)
+        return model
+    
     def run(
         self,
         data_path: str = None,
@@ -68,7 +245,8 @@ class NLPClassificationPipeline:
         
         Args:
             data_path: Path pattern for review files
-            model_names: List of specific model names to run (e.g., ['logistic_regression', 'naive_bayes_multinomial'])
+            model_names: List of specific model names to run
+                        (e.g., ['logistic_regression', 'bert_base'])
             use_mlflow: Whether to use MLflow logging
             
         Returns:
@@ -87,6 +265,7 @@ class NLPClassificationPipeline:
         
         try:
             data = self.data_loader.prepare_data(data_path=data_path, preprocess=True)
+            self._data_cache = data  # Cache for LM models
             
             X_train = data['X_train']
             X_val = data['X_val']
@@ -95,11 +274,16 @@ class NLPClassificationPipeline:
             y_val = data['y_val']
             y_test = data['y_test']
             
+            # Also get raw texts for LM models
+            train_texts = data['train_df']['review'].tolist()
+            val_texts = data['val_df']['review'].tolist()
+            test_texts = data['test_df']['review'].tolist()
+            
             print(f"Dataset loaded successfully!")
             print(f"  Train size: {len(y_train)}")
             print(f"  Validation size: {len(y_val)}")
             print(f"  Test size: {len(y_test)}")
-            print(f"  Feature dimension: {X_train.shape[1]}")
+            print(f"  Feature dimension (TF-IDF): {X_train.shape[1]}")
             
         except Exception as e:
             print(f"Error loading data: {e}")
@@ -120,17 +304,9 @@ class NLPClassificationPipeline:
         
         # Filter to only requested models if model_names specified
         if model_names is not None:
-            # Map model names to their display names
-            model_name_mapping = {
-                'logistic_regression': 'LogisticRegression',
-                'naive_bayes_multinomial': 'MultinomialNB',
-                'naive_bayes_bernoulli': 'BernoulliNB',
-                'naive_bayes_gaussian': 'GaussianNB'
-            }
-            
             filtered_models = {}
             for model_name in model_names:
-                display_name = model_name_mapping.get(model_name, model_name.capitalize())
+                display_name = self.MODEL_NAME_MAPPING.get(model_name, model_name)
                 if display_name in models:
                     filtered_models[display_name] = models[display_name]
                 else:
@@ -142,16 +318,27 @@ class NLPClassificationPipeline:
             print("No models to train! Check your configuration.")
             return {}
         
+        # Separate ML and LM models
+        ml_models = {k: v for k, v in models.items() if not self._is_lm_model(v)}
+        lm_models = {k: v for k, v in models.items() if self._is_lm_model(v)}
+        
         print(f"Models to train: {list(models.keys())}")
+        if ml_models:
+            print(f"  ML models: {list(ml_models.keys())}")
+        if lm_models:
+            print(f"  LM models: {list(lm_models.keys())}")
         
         # [3/5] Train and evaluate each model
         print("\n[3/5] Training and evaluating models...")
         print("-" * 80)
         
-        for idx, (model_name, model) in enumerate(models.items(), 1):
-            print(f"\n[Model {idx}/{len(models)}] {model_name}")
+        all_models = list(models.items())
+        for idx, (model_name, model) in enumerate(all_models, 1):
+            print(f"\n[Model {idx}/{len(all_models)}] {model_name}")
             print("=" * 60)
             print(f"  Model type: {model.model_type}")
+            
+            is_lm = self._is_lm_model(model)
             
             # Check if model already exists
             model_path = os.path.join(
@@ -165,21 +352,58 @@ class NLPClassificationPipeline:
             trained_model = None
             model_loaded = False
             
-            # Try to load existing model
+            # Try to load existing model and its results
             if os.path.exists(model_path):
-                print(f"  Loading existing model from: {model_path}")
+                print(f"  Found existing model at: {model_path}")
                 try:
-                    trained_model = joblib.load(model_path)
-                    model_loaded = True
-                    print("  Model loaded successfully")
+                    if is_lm:
+                        # Load LM model
+                        trained_model = self._load_lm_model(model, model_path)
+                    else:
+                        # Load ML model
+                        trained_model = joblib.load(model_path)
                     
-                    # Re-evaluate loaded model
-                    print("  Re-evaluating loaded model...")
-                    metrics, trained_model, predictions_dict = self.evaluator.evaluate_model(
-                        trained_model,
-                        X_train, X_val, X_test,
-                        y_train, y_val, y_test
-                    )
+                    model_loaded = True
+                    print("  ✓ Model loaded successfully")
+                    
+                    # Check if we have saved predictions
+                    metrics_file = os.path.join(self.config['paths']['metrics_dir'], 'results_summary.json')
+                    has_saved_predictions = False
+                    
+                    if os.path.exists(metrics_file):
+                        with open(metrics_file, 'r') as f:
+                            saved_results = json.load(f)
+                        if model_name in saved_results and 'predictions' in saved_results[model_name]:
+                            print("  ✓ Found saved predictions, skipping re-evaluation")
+                            metrics = saved_results[model_name].get('metrics', {})
+                            # Convert predictions back to dict format
+                            predictions_dict = {}
+                            for split_name, pred_data in saved_results[model_name]['predictions'].items():
+                                predictions_dict[split_name] = {
+                                    'predictions': np.array(pred_data['predictions']),
+                                    'actuals': np.array(pred_data['actuals']),
+                                    'probabilities': np.array(pred_data['probabilities']) if pred_data.get('probabilities') is not None else None
+                                }
+                            has_saved_predictions = True
+                    
+                    # Re-evaluate only if no saved predictions
+                    if not has_saved_predictions:
+                        print("  No saved predictions found, re-evaluating...")
+                        if is_lm:
+                            # Re-evaluate LM model
+                            metrics, trained_model, predictions_dict = self._train_lm_model(
+                                trained_model,
+                                train_texts, y_train,
+                                val_texts, y_val,
+                                test_texts, y_test
+                            )
+                        else:
+                            # Re-evaluate ML model
+                            metrics, trained_model, predictions_dict = self.evaluator.evaluate_model(
+                                trained_model,
+                                X_train, X_val, X_test,
+                                y_train, y_val, y_test
+                            )
                 except Exception as e:
                     print(f"  Warning: Could not load model, will train new one: {e}")
                     model_loaded = False
@@ -214,12 +438,21 @@ class NLPClassificationPipeline:
                         use_mlflow = False
                 
                 try:
-                    # Evaluate model
-                    metrics, trained_model, predictions_dict = self.evaluator.evaluate_model(
-                        model,
-                        X_train, X_val, X_test,
-                        y_train, y_val, y_test
-                    )
+                    if is_lm:
+                        # Train LM model with raw texts
+                        metrics, trained_model, predictions_dict = self._train_lm_model(
+                            model,
+                            train_texts, y_train,
+                            val_texts, y_val,
+                            test_texts, y_test
+                        )
+                    else:
+                        # Train ML model with TF-IDF features
+                        metrics, trained_model, predictions_dict = self.evaluator.evaluate_model(
+                            model,
+                            X_train, X_val, X_test,
+                            y_train, y_val, y_test
+                        )
                     
                     if not metrics:
                         print(f"  Skipping {model_name} due to evaluation errors")
@@ -229,7 +462,10 @@ class NLPClassificationPipeline:
                     
                     # Save newly trained model
                     try:
-                        joblib.dump(trained_model, model_path)
+                        if is_lm:
+                            self._save_lm_model(trained_model, model_name, model_path)
+                        else:
+                            joblib.dump(trained_model, model_path)
                         print(f"  Model saved to: {model_path}")
                     except Exception as e:
                         print(f"  Warning: Could not save model: {e}")
@@ -242,34 +478,32 @@ class NLPClassificationPipeline:
                                 if isinstance(value, (int, float)):
                                     mlflow.log_metric(key, value)
                             
-                            # Log model artifact
-                            # Note: registered_model_name requires MLflow Model Registry (optional)
-                            try:
-                                mlflow.sklearn.log_model(
-                                    trained_model,
-                                    artifact_path="model",
-                                    registered_model_name=f"{model_name}"
-                                )
-                            except Exception:
-                                # If model registry is not available, just log the model without registration
-                                mlflow.sklearn.log_model(
-                                    trained_model,
-                                    artifact_path="model"
-                                )
+                            if not is_lm:
+                                # Log sklearn model artifact
+                                try:
+                                    mlflow.sklearn.log_model(
+                                        trained_model,
+                                        artifact_path="model",
+                                        registered_model_name=f"{model_name}"
+                                    )
+                                except Exception:
+                                    mlflow.sklearn.log_model(
+                                        trained_model,
+                                        artifact_path="model"
+                                    )
                             
-                            # Log confusion matrix
+                            # Log figures
                             if 'test' in predictions_dict:
                                 test_pred = predictions_dict['test']['predictions']
                                 test_actual = predictions_dict['test']['actuals']
                                 fig = self.evaluator.plot_confusion_matrix(
                                     test_actual, test_pred, model_name
                                 )
-                                # Save figure temporarily for MLflow
                                 cm_path = os.path.join(self.config['paths']['figures_dir'], 
                                                       f"{model_name}_confusion_matrix_temp.png")
                                 fig.savefig(cm_path)
                                 mlflow.log_artifact(cm_path, "figures")
-                                os.remove(cm_path)  # Clean up temp file
+                                os.remove(cm_path)
                                 fig.clf()
                             
                             # Log ROC curve if probabilities available
@@ -279,12 +513,11 @@ class NLPClassificationPipeline:
                                 fig = self.evaluator.plot_roc_curve(
                                     test_actual, test_proba, model_name
                                 )
-                                # Save figure temporarily for MLflow
                                 roc_path = os.path.join(self.config['paths']['figures_dir'],
                                                        f"{model_name}_roc_curve_temp.png")
                                 fig.savefig(roc_path)
                                 mlflow.log_artifact(roc_path, "figures")
-                                os.remove(roc_path)  # Clean up temp file
+                                os.remove(roc_path)
                                 fig.clf()
                             
                         except Exception as e:
@@ -318,7 +551,7 @@ class NLPClassificationPipeline:
                     if key in metrics:
                         print(f"    {metric.upper()}: {metrics[key]:.4f}")
                 
-                # Print CV results if available
+                # Print CV results if available (only for ML models)
                 if 'cv_f1_mean' in metrics:
                     print(f"\n  Cross-validation (F1): {metrics['cv_f1_mean']:.4f} "
                           f"(±{metrics['cv_f1_std']:.4f})")
@@ -331,43 +564,8 @@ class NLPClassificationPipeline:
         print("\n[4/5] Comparing models...")
         print("-" * 80)
         
-        try:
-            # Create comparison plot
-            comparison_fig = self.evaluator.compare_models(
-                self.results,
-                save_path=self.config['paths']['figures_dir']
-            )
-            comparison_fig.clf()
-            plt.close(comparison_fig)
-            
-            # Create confusion matrices and ROC curves for each model
-            for model_name, result_data in self.results.items():
-                if 'test' in result_data['predictions']:
-                    pred_data = result_data['predictions']['test']
-                    test_pred = pred_data['predictions']
-                    test_actual = pred_data['actuals']
-                    
-                    # Confusion matrix
-                    fig = self.evaluator.plot_confusion_matrix(
-                        test_actual, test_pred, model_name,
-                        save_path=self.config['paths']['figures_dir']
-                    )
-                    fig.clf()
-                    plt.close(fig)
-                    
-                    # ROC curve if probabilities available
-                    if pred_data['probabilities'] is not None:
-                        fig = self.evaluator.plot_roc_curve(
-                            test_actual, pred_data['probabilities'], model_name,
-                            save_path=self.config['paths']['figures_dir']
-                        )
-                        fig.clf()
-                        plt.close(fig)
-                    
-        except Exception as e:
-            print(f"Warning: Could not create comparison plots: {e}")
-            import traceback
-            traceback.print_exc()
+        print("  Individual model results saved.")
+        print("  Combined visualizations will be generated after all experiments complete.")
         
         # [5/5] Save results and determine best model
         print("\n[5/5] Saving results...")
@@ -435,7 +633,7 @@ class NLPClassificationPipeline:
         
         return best_model
     
-    def load_model(self, model_name: str) -> any:
+    def load_model(self, model_name: str) -> Any:
         """
         Load a saved model.
         
@@ -449,6 +647,29 @@ class NLPClassificationPipeline:
             self.config['paths']['models_dir'],
             f"{model_name}.pkl"
         )
+        
+        # Check if it's an LM model by reading the marker file
+        if os.path.exists(model_path):
+            try:
+                with open(model_path, 'r') as f:
+                    content = f.read()
+                    if content.startswith('{'):
+                        marker = json.loads(content)
+                        if marker.get('type') == 'lm':
+                            # It's an LM model, need to create the right type
+                            from models.LMs import BERTClassifier, DistilBERTClassifier, RoBERTaClassifier
+                            model_classes = {
+                                'BERT': BERTClassifier,
+                                'DistilBERT': DistilBERTClassifier,
+                                'RoBERTa': RoBERTaClassifier,
+                            }
+                            if model_name in model_classes:
+                                model = model_classes[model_name]()
+                                model.load(marker['path'])
+                                return model
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass  # Not an LM model, load as joblib
+        
         return joblib.load(model_path)
     
     def predict_with_model(
@@ -468,12 +689,12 @@ class NLPClassificationPipeline:
         """
         model = self.load_model(model_name)
         
-        # Preprocess texts
-        processed_texts = self.data_loader.preprocess_texts(texts)
-        
-        # Vectorize texts
-        X = self.data_loader.vectorize_texts(processed_texts, fit=False)
-        
-        return model.predict(X)
-
-
+        # Check if it's an LM model
+        if hasattr(model, 'model_type') and model.model_type.startswith('lm'):
+            # LM models use raw text directly
+            return model.predict(texts)
+        else:
+            # ML models need preprocessing and vectorization
+            processed_texts = self.data_loader.preprocess_texts(texts)
+            X = self.data_loader.vectorize_texts(processed_texts, fit=False)
+            return model.predict(X)

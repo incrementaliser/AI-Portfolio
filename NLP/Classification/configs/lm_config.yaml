@@ -1,0 +1,89 @@
+# Language Model (LM) Configuration for NLP Classification
+# This configuration extends the main config.yaml with LM-specific settings
+
+# LM Model Configurations
+# To use these models, add them to the 'lm' section in your main config.yaml
+# or specify them in experiments in main.py
+
+models:
+  lm:
+    # BERT Base - Standard BERT model
+    # ~110M parameters, good balance of performance and speed
+    bert_base:
+      model_name: "bert-base-uncased"
+      max_length: 256
+      batch_size: 16
+      learning_rate: 2.0e-5
+      epochs: 3
+      warmup_ratio: 0.1
+      weight_decay: 0.01
+      fp16: true
+      early_stopping_patience: 2
+      random_state: 42
+    
+    # DistilBERT - Distilled BERT model (recommended for faster training)
+    # ~66M parameters, 60% faster than BERT, 97% of BERT's performance
+    distilbert:
+      model_name: "distilbert-base-uncased"
+      max_length: 256
+      batch_size: 32  # Can use larger batch due to smaller model
+      learning_rate: 3.0e-5  # Slightly higher LR works well
+      epochs: 3
+      warmup_ratio: 0.1
+      weight_decay: 0.01
+      fp16: true
+      early_stopping_patience: 2
+      random_state: 42
+    
+    # RoBERTa Base - Robustly Optimized BERT
+    # ~125M parameters, often better than BERT on many tasks
+    roberta_base:
+      model_name: "roberta-base"
+      max_length: 256
+      batch_size: 16
+      learning_rate: 2.0e-5
+      epochs: 3
+      warmup_ratio: 0.1
+      weight_decay: 0.01
+      fp16: true
+      early_stopping_patience: 2
+      random_state: 42
+
+# Training Configuration
+training:
+  # Device settings
+  device: "auto"  # "auto", "cuda", "cpu"
+  
+  # Gradient accumulation (useful for large batches with limited VRAM)
+  gradient_accumulation_steps: 1
+  
+  # Gradient clipping
+  max_grad_norm: 1.0
+  
+  # Logging
+  logging_steps: 100
+  save_steps: 500
+
+# Inference Configuration
+inference:
+  # Batch size for inference (can be larger than training)
+  batch_size: 64
+  
+  # Whether to use FP16 for inference
+  fp16: true
+
+# Model Comparison Notes:
+# 
+# | Model          | Parameters | Speed  | Memory  | Accuracy |
+# |----------------|------------|--------|---------|----------|
+# | BERT-base      | 110M       | 1x     | ~4GB    | Baseline |
+# | DistilBERT     | 66M        | 1.6x   | ~2.5GB  | ~97%     |
+# | RoBERTa-base   | 125M       | 0.9x   | ~4.5GB  | ~101%    |
+#
+# Recommendations:
+# - Start with DistilBERT for rapid experimentation
+# - Use BERT-base for standard benchmarks
+# - Use RoBERTa for best performance when compute allows
+
+
+

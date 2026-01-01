@@ -42,13 +42,15 @@ def setup_directories(config: dict) -> None:
 
 def save_results(results: dict, path: str, append: bool = False) -> None:
     """
-    Save results to JSON file.
+    Save results to JSON file, including predictions for visualization.
     
     Args:
         results: Dictionary of model results
         path: Directory path to save results (can be relative or absolute)
         append: If True, append to existing results instead of overwriting
     """
+    import numpy as np
+    
     # Ensure path is absolute
     if not os.path.isabs(path):
         path = os.path.abspath(path)
@@ -59,7 +61,8 @@ def save_results(results: dict, path: str, append: bool = False) -> None:
     json_results = {}
     for model_name, result_dict in results.items():
         json_results[model_name] = {
-            'metrics': {}
+            'metrics': {},
+            'model_type': result_dict.get('model_type', 'unknown')
         }
         
         # Convert metrics to JSON-serializable format
@@ -70,6 +73,16 @@ def save_results(results: dict, path: str, append: bool = False) -> None:
                 json_results[model_name]['metrics'][metric_name] = float(metric_value)
             else:
                 json_results[model_name]['metrics'][metric_name] = str(metric_value)
+        
+        # Save predictions for visualization (convert numpy arrays to lists)
+        if 'predictions' in result_dict:
+            json_results[model_name]['predictions'] = {}
+            for split_name, pred_data in result_dict['predictions'].items():
+                json_results[model_name]['predictions'][split_name] = {
+                    'predictions': pred_data['predictions'].tolist() if isinstance(pred_data['predictions'], np.ndarray) else pred_data['predictions'],
+                    'actuals': pred_data['actuals'].tolist() if isinstance(pred_data['actuals'], np.ndarray) else pred_data['actuals'],
+                    'probabilities': pred_data['probabilities'].tolist() if pred_data['probabilities'] is not None and isinstance(pred_data['probabilities'], np.ndarray) else pred_data.get('probabilities')
+                }
     
     # Save to file
     results_path = os.path.join(path, 'results_summary.json')
