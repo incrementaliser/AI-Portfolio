@@ -1,0 +1,193 @@
+# Advanced Model Configuration
+# 
+# This configuration includes advanced training options:
+# - Accelerate: Multi-GPU, mixed precision, gradient accumulation
+# - Unsloth: Efficient LoRA/QLoRA fine-tuning
+# - DSpy: Learnable prompt optimization
+#
+# Based on recommendations from suggestions.txt
+
+models:
+  # =========================================================
+  # ACCELERATE-BASED MODELS (Phase 1: BERT fine-tuning)
+  # =========================================================
+  # Uses HuggingFace Accelerate for:
+  # - Multi-GPU training
+  # - Automatic mixed precision (FP16/BF16)
+  # - Gradient accumulation
+  # - Hardware-agnostic code
+  
+  accelerate:
+    bert_accelerate:
+      model_name: "bert-base-uncased"
+      max_length: 256
+      batch_size: 16
+      learning_rate: 2e-5
+      epochs: 3
+      warmup_ratio: 0.1
+      weight_decay: 0.01
+      gradient_accumulation_steps: 2  # Effective batch = 16 * 2 = 32
+      mixed_precision: "fp16"  # "no", "fp16", or "bf16"
+      early_stopping_patience: 2
+    
+    distilbert_accelerate:
+      model_name: "distilbert-base-uncased"
+      max_length: 256
+      batch_size: 32
+      learning_rate: 3e-5
+      epochs: 3
+      warmup_ratio: 0.1
+      gradient_accumulation_steps: 1
+      mixed_precision: "fp16"
+      early_stopping_patience: 2
+    
+    roberta_accelerate:
+      model_name: "roberta-base"
+      max_length: 256
+      batch_size: 16
+      learning_rate: 2e-5
+      epochs: 3
+      gradient_accumulation_steps: 2
+      mixed_precision: "fp16"
+      early_stopping_patience: 2
+
+  # =========================================================
+  # UNSLOTH LORA MODELS (Phase 3: LLM fine-tuning)
+  # =========================================================
+  # Uses Unsloth for 2-5x faster LoRA training with:
+  # - Optimized memory usage (60% reduction)
+  # - 4-bit quantization (QLoRA)
+  # - Efficient gradient checkpointing
+  
+  unsloth:
+    # Small model - fast training, good for testing
+    llama_lora:
+      model_name: "unsloth/Llama-3.2-1B-Instruct"
+      max_length: 512
+      load_in_4bit: true
+      lora_r: 16  # LoRA rank
+      lora_alpha: 16
+      lora_dropout: 0.0
+      batch_size: 4
+      gradient_accumulation_steps: 4  # Effective batch = 16
+      learning_rate: 2e-4
+      epochs: 1
+      warmup_ratio: 0.03
+    
+    # Medium model - better quality
+    phi_lora:
+      model_name: "unsloth/Phi-3.5-mini-instruct"
+      max_length: 512
+      load_in_4bit: true
+      lora_r: 16
+      lora_alpha: 32
+      batch_size: 2
+      gradient_accumulation_steps: 8
+      learning_rate: 1e-4
+      epochs: 1
+    
+    # Large model - best quality, requires ~16GB VRAM
+    mistral_lora:
+      model_name: "unsloth/Mistral-7B-Instruct-v0.3"
+      max_length: 512
+      load_in_4bit: true
+      lora_r: 32
+      lora_alpha: 32
+      batch_size: 1
+      gradient_accumulation_steps: 16
+      learning_rate: 5e-5
+      epochs: 1
+
+  # =========================================================
+  # DSPY OPTIMIZED PROMPTING (Phase 2: Prompt optimization)
+  # =========================================================
+  # Uses DSpy for systematic prompt engineering:
+  # - Treats prompts as learnable parameters
+  # - Automatic few-shot example selection
+  # - Multi-step reasoning chains
+  
+  dspy:
+    # Basic DSpy with prompt optimization
+    dspy_predict:
+      model_name: "mistralai/Mistral-7B-Instruct-v0.2"
+      technique: "predict"  # Simple prediction
+      optimize: true
+      optimizer: "bootstrap"  # Fast optimization
+      max_bootstrapped_demos: 4
+      max_labeled_demos: 16
+      temperature: 0.0
+    
+    # Chain-of-thought with optimization
+    dspy_cot:
+      model_name: "mistralai/Mistral-7B-Instruct-v0.2"
+      technique: "cot"  # Chain-of-thought reasoning
+      optimize: true
+      optimizer: "bootstrap"
+      max_bootstrapped_demos: 4
+      max_labeled_demos: 8  # Fewer examples due to longer prompts
+      temperature: 0.1
+    
+    # MIPRO optimizer (slower but better quality)
+    dspy_mipro:
+      model_name: "mistralai/Mistral-7B-Instruct-v0.2"
+      technique: "predict"
+      optimize: true
+      optimizer: "mipro"
+      num_candidates: 10
+      max_labeled_demos: 16
+      temperature: 0.0
+
+# =========================================================
+# TRAINING CONFIGURATION
+# =========================================================
+training:
+  # Accelerate settings
+  accelerate:
+    # For multi-GPU setup, run: accelerate config
+    # This generates ~/.cache/huggingface/accelerate/default_config.yaml
+    gradient_checkpointing: true
+    max_grad_norm: 1.0
+  
+  # Unsloth settings
+  unsloth:
+    # LoRA targets for different architectures
+    llama_targets: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+    phi_targets: ["q_proj", "k_proj", "v_proj", "dense", "fc1", "fc2"]
+    mistral_targets: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+  
+  # DSpy settings
+  dspy:
+    # Rate limiting for API calls
+    rate_limit_delay: 1.0
+    max_retries: 3
+
+# =========================================================
+# USAGE GUIDE
+# =========================================================
+# 
+# 1. Accelerate (recommended for BERT fine-tuning):
+#    - Best for: Multi-GPU setups, memory-constrained environments
+#    - Install: pip install accelerate
+#    - Configure: accelerate config (for multi-GPU)
+#
+# 2. Unsloth (recommended for LLM fine-tuning):
+#    - Best for: Fine-tuning large models with limited VRAM
+#    - Install: pip install unsloth
+#    - Requires: NVIDIA GPU with CUDA
+#
+# 3. DSpy (recommended for prompt optimization):
+#    - Best for: Automatically improving prompts
+#    - Install: pip install dspy-ai
+#    - Requires: HF_TOKEN for API access
+#
+# Model Size vs Quality Tradeoff:
+# | Model                  | Params | VRAM  | Speed   | Quality  |
+# |------------------------|--------|-------|---------|----------|
+# | DistilBERT (Accel)     | 66M    | ~4GB  | Fast    | Good     |
+# | BERT (Accelerate)      | 110M   | ~6GB  | Medium  | Better   |
+# | Llama 1B (Unsloth)     | 1B     | ~4GB  | Medium  | Good     |
+# | Phi-3.5 (Unsloth)      | 3.8B   | ~8GB  | Slow    | Better   |
+# | Mistral 7B (Unsloth)   | 7B     | ~16GB | Slower  | Best     |
+# | DSpy (API)             | API    | N/A   | Depends | Variable |
+
+

@@ -1,0 +1,141 @@
+# LLM Prompting Configuration for NLP Classification
+# 
+# This configuration defines prompt-based models for sentiment classification.
+# Supports HuggingFace Inference API (free tier) and local model inference.
+#
+# Requirements:
+#   - HuggingFace API token (set HF_TOKEN environment variable)
+#   - langchain, huggingface_hub packages installed
+#   - For local models: transformers, torch
+
+models:
+  prompting:
+    # =========================================================
+    # HuggingFace API Models (Free Tier)
+    # =========================================================
+    # These use the serverless inference API - no local GPU needed
+    # Rate limited but free for testing and small projects
+    
+    # Zero-shot with Mistral 7B Instruct (recommended starting point)
+    zero_shot_mistral:
+      backend: "hf_api"
+      model_name: "mistralai/Mistral-7B-Instruct-v0.2"
+      technique: "zero_shot"
+      max_new_tokens: 20
+      temperature: 0.1
+      use_instruct_format: true
+    
+    # Few-shot with Mistral 7B Instruct
+    few_shot_mistral:
+      backend: "hf_api"
+      model_name: "mistralai/Mistral-7B-Instruct-v0.2"
+      technique: "few_shot"
+      num_examples: 3
+      max_new_tokens: 20
+      temperature: 0.1
+      use_instruct_format: true
+      use_training_examples: true
+    
+    # Chain-of-thought with Mistral 7B Instruct
+    cot_mistral:
+      backend: "hf_api"
+      model_name: "mistralai/Mistral-7B-Instruct-v0.2"
+      technique: "chain_of_thought"
+      max_new_tokens: 300
+      temperature: 0.3
+      use_instruct_format: true
+    
+    # Alternative: Llama 3 8B Instruct (if accessible)
+    # Note: May require accepting license on HuggingFace
+    # zero_shot_llama:
+    #   backend: "hf_api"
+    #   model_name: "meta-llama/Meta-Llama-3-8B-Instruct"
+    #   technique: "zero_shot"
+    #   max_new_tokens: 20
+    #   temperature: 0.1
+    
+    # =========================================================
+    # Local Models (Requires GPU)
+    # =========================================================
+    # These run on your local machine - faster but needs GPU
+    
+    # Zero-shot with Phi-3 Mini (small, fast, good quality)
+    # ~4GB VRAM required
+    zero_shot_phi3:
+      backend: "local"
+      model_name: "microsoft/Phi-3-mini-4k-instruct"
+      technique: "zero_shot"
+      max_new_tokens: 20
+      temperature: 0.1
+      device: "auto"
+      torch_dtype: "float16"
+    
+    # Few-shot with Phi-3 Mini
+    few_shot_phi3:
+      backend: "local"
+      model_name: "microsoft/Phi-3-mini-4k-instruct"
+      technique: "few_shot"
+      num_examples: 3
+      max_new_tokens: 20
+      temperature: 0.1
+      device: "auto"
+      torch_dtype: "float16"
+    
+    # Chain-of-thought with Phi-3 Mini
+    cot_phi3:
+      backend: "local"
+      model_name: "microsoft/Phi-3-mini-4k-instruct"
+      technique: "chain_of_thought"
+      max_new_tokens: 300
+      temperature: 0.3
+      device: "auto"
+      torch_dtype: "float16"
+    
+    # Alternative: TinyLlama (very small, ~2GB VRAM)
+    # zero_shot_tinyllama:
+    #   backend: "local"
+    #   model_name: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    #   technique: "zero_shot"
+    #   max_new_tokens: 20
+    #   temperature: 0.1
+
+# =========================================================
+# Inference Configuration
+# =========================================================
+inference:
+  hf_api:
+    # Rate limiting for API calls (seconds between calls)
+    rate_limit_delay: 1.0
+    # Request timeout in seconds
+    timeout: 30
+    # Number of retry attempts on failure
+    retry_attempts: 3
+  
+  local:
+    # Device selection: "auto", "cuda", "cpu"
+    device: "auto"
+    # Data type: "float16", "bfloat16", "float32"
+    torch_dtype: "float16"
+    # Optional: Use quantization for larger models
+    # load_in_8bit: false
+    # load_in_4bit: false
+
+# =========================================================
+# Model Comparison Notes
+# =========================================================
+# 
+# | Model                      | Size  | Backend | Speed   | Quality  |
+# |----------------------------|-------|---------|---------|----------|
+# | Mistral-7B-Instruct (API)  | 7B    | hf_api  | Medium  | High     |
+# | Llama-3-8B-Instruct (API)  | 8B    | hf_api  | Medium  | High     |
+# | Phi-3-mini (Local)         | 3.8B  | local   | Fast    | Good     |
+# | TinyLlama (Local)          | 1.1B  | local   | V.Fast  | Moderate |
+#
+# Recommendations:
+# - Start with zero_shot_mistral (API) for quick experiments
+# - Use few_shot_mistral for better accuracy
+# - Use local models (Phi-3) for large-scale inference without API limits
+# - CoT is best for understanding model reasoning, slightly slower
+
+
+

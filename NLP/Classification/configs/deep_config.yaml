@@ -1,0 +1,253 @@
+# Deep Learning Model Configuration
+#
+# Neural network architectures for text classification:
+# - Feedforward (MLP): Simple baseline
+# - CNN: Captures n-gram patterns
+# - RNN (LSTM/GRU): Sequential modeling
+# - Attention: Focus on important tokens
+# - Transformer: State-of-the-art
+#
+# Requirements:
+#   - PyTorch: pip install torch
+#   - PyTorch Lightning (for RNN/Attention): pip install pytorch-lightning
+
+models:
+  deep:
+    # =========================================================
+    # FEEDFORWARD / MLP MODELS (PyTorch)
+    # =========================================================
+    # Simple but effective baseline using averaged embeddings
+    
+    mlp:
+      vocab_size: 30000
+      embedding_dim: 128
+      hidden_dim: 256
+      num_classes: 2
+      num_layers: 2
+      max_length: 256
+      dropout: 0.3
+      batch_size: 64
+      learning_rate: 0.001
+      epochs: 10
+      early_stopping_patience: 3
+    
+    deep_mlp:
+      vocab_size: 30000
+      embedding_dim: 128
+      hidden_dim: 512
+      num_classes: 2
+      num_layers: 4
+      max_length: 256
+      dropout: 0.3
+      batch_size: 64
+      learning_rate: 0.001
+      epochs: 10
+      use_batch_norm: true
+    
+    # =========================================================
+    # CNN MODELS (PyTorch)
+    # =========================================================
+    # Captures local n-gram patterns effectively
+    
+    cnn:
+      vocab_size: 30000
+      embedding_dim: 128
+      num_classes: 2
+      num_filters: 100
+      filter_sizes: [2, 3, 4, 5]
+      max_length: 256
+      dropout: 0.5
+      batch_size: 64
+      learning_rate: 0.001
+      epochs: 10
+    
+    deep_cnn:
+      vocab_size: 30000
+      embedding_dim: 128
+      hidden_dim: 256
+      num_classes: 2
+      num_filters: 128
+      filter_sizes: [3, 4, 5]
+      num_layers: 3
+      max_length: 256
+      dropout: 0.5
+      batch_size: 64
+      learning_rate: 0.001
+      epochs: 10
+      use_residual: true
+    
+    # =========================================================
+    # RNN MODELS (PyTorch Lightning)
+    # =========================================================
+    # Sequential models that capture long-range dependencies
+    
+    lstm:
+      vocab_size: 30000
+      embedding_dim: 128
+      hidden_dim: 256
+      num_classes: 2
+      num_layers: 2
+      bidirectional: false
+      max_length: 256
+      dropout: 0.3
+      batch_size: 32
+      learning_rate: 0.001
+      epochs: 10
+    
+    bilstm:
+      vocab_size: 30000
+      embedding_dim: 128
+      hidden_dim: 256
+      num_classes: 2
+      num_layers: 2
+      bidirectional: true
+      max_length: 256
+      dropout: 0.3
+      batch_size: 32
+      learning_rate: 0.001
+      epochs: 10
+    
+    gru:
+      vocab_size: 30000
+      embedding_dim: 128
+      hidden_dim: 256
+      num_classes: 2
+      num_layers: 2
+      bidirectional: false
+      max_length: 256
+      dropout: 0.3
+      batch_size: 32
+      learning_rate: 0.001
+      epochs: 10
+    
+    bigru:
+      vocab_size: 30000
+      embedding_dim: 128
+      hidden_dim: 256
+      num_classes: 2
+      num_layers: 2
+      bidirectional: true
+      max_length: 256
+      dropout: 0.3
+      batch_size: 32
+      learning_rate: 0.001
+      epochs: 10
+    
+    # =========================================================
+    # ATTENTION MODELS (PyTorch Lightning)
+    # =========================================================
+    # BiLSTM with various attention mechanisms
+    
+    bilstm_attention:
+      vocab_size: 30000
+      embedding_dim: 128
+      hidden_dim: 256
+      num_classes: 2
+      num_layers: 2
+      attention_type: "additive"  # "additive", "self", "multihead"
+      num_heads: 8  # For multihead attention
+      max_length: 256
+      dropout: 0.3
+      batch_size: 32
+      learning_rate: 0.001
+      epochs: 10
+    
+    bilstm_self_attention:
+      vocab_size: 30000
+      embedding_dim: 128
+      hidden_dim: 256
+      num_classes: 2
+      num_layers: 2
+      attention_type: "self"
+      max_length: 256
+      dropout: 0.3
+      batch_size: 32
+      learning_rate: 0.001
+      epochs: 10
+    
+    bilstm_multihead_attention:
+      vocab_size: 30000
+      embedding_dim: 256
+      hidden_dim: 256
+      num_classes: 2
+      num_layers: 2
+      attention_type: "multihead"
+      num_heads: 8
+      max_length: 256
+      dropout: 0.3
+      batch_size: 32
+      learning_rate: 0.001
+      epochs: 10
+    
+    # =========================================================
+    # TRANSFORMER MODELS (PyTorch)
+    # =========================================================
+    # Custom Transformer encoder for classification
+    
+    transformer_tiny:
+      vocab_size: 30000
+      d_model: 128
+      num_heads: 4
+      num_layers: 2
+      d_ff: 512
+      num_classes: 2
+      max_length: 256
+      pooling: "mean"  # "mean", "cls", "max"
+      dropout: 0.1
+      batch_size: 32
+      learning_rate: 0.0001
+      epochs: 10
+      warmup_steps: 100
+    
+    transformer_small:
+      vocab_size: 30000
+      d_model: 256
+      num_heads: 8
+      num_layers: 4
+      d_ff: 1024
+      num_classes: 2
+      max_length: 256
+      pooling: "mean"
+      dropout: 0.1
+      batch_size: 32
+      learning_rate: 0.0001
+      epochs: 10
+      warmup_steps: 200
+    
+    transformer_base:
+      vocab_size: 30000
+      d_model: 512
+      num_heads: 8
+      num_layers: 6
+      d_ff: 2048
+      num_classes: 2
+      max_length: 256
+      pooling: "mean"
+      dropout: 0.1
+      batch_size: 16
+      learning_rate: 0.0001
+      epochs: 10
+      warmup_steps: 500
+
+# =========================================================
+# MODEL COMPARISON GUIDE
+# =========================================================
+#
+# | Model              | Params  | Speed   | Accuracy | Use Case              |
+# |--------------------|---------|---------|----------|-----------------------|
+# | MLP                | ~500K   | Fastest | Baseline | Quick experiments     |
+# | CNN                | ~1M     | Fast    | Good     | N-gram patterns       |
+# | LSTM               | ~2M     | Medium  | Good     | Sequential data       |
+# | BiLSTM             | ~4M     | Medium  | Better   | Bidirectional context |
+# | BiLSTM + Attention | ~5M     | Slower  | Better   | Focus on key tokens   |
+# | Transformer Tiny   | ~1M     | Medium  | Good     | Modern architecture   |
+# | Transformer Small  | ~5M     | Slower  | Better   | Balanced performance  |
+# | Transformer Base   | ~20M    | Slow    | Best     | Maximum capacity      |
+#
+# Recommendations:
+# - Start with MLP/CNN for quick baselines
+# - Use BiLSTM for sequential dependencies
+# - Use BiLSTM + Attention for interpretability
+# - Use Transformer for best performance (with more compute)
+
+
