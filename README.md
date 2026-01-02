@@ -1,25 +1,15 @@
-# AI Portfolio
+# AI Portfolio⚡
 
-My portfolio of applied AI and machine learning projects demonstrating various techniques across time series forecasting, natural language processing, and traditional machine learning tasks.
+## TL;DR
 
-## Features
+My portfolio of applied AI and machine learning projects demonstrating various techniques across **time series forecasting**, **natural language processing**, **traditional machine learning** and **data visualisation** tasks, currently including:
 
-- **Modular Architecture**: Clean separation between different ML domains with reusable pipeline components
-- **Production-Ready Code**: Well-structured, documented, and maintainable implementations
-- **Comprehensive Evaluation**: Multiple metrics, visualisations, and comparative analysis
-- **Configuration-Driven**: Easy experimentation through YAML configuration files
-- **Extensible Design**: Framework supports adding new models and project types
-
-## Current Implementation: Time Series Forecasting
-
-The time series module provides a complete pipeline for forecasting with multiple models and evaluation horizons.
-
-### Models in Use
+#### **Time Series**
 
 - **XGBoost**: Gradient boosting implementation for time series prediction
 - **Prophet**: Facebook's forecasting tool for time series with seasonality
 
-### Capabilities
+##### Capabilities
 
 - Multi-horizon forecasting (e.g., 1-day, 7-day, 30-day ahead)
 - Comprehensive metrics: MAE, RMSE, MAPE, SMAPE, R², MASE
@@ -28,7 +18,29 @@ The time series module provides a complete pipeline for forecasting with multipl
 - Model comparison with detailed visualisations
 - Persistent model storage and results tracking
 
-## Project Structure
+#### Product Reviews Classification
+
+* Machine learning based models: logistic regression, naive bayes
+* Deep learning based models: feed forward neural network, CNN, RNN (LSTM), GRU,Bi-LSTM with attention
+* Pre-trained language models:
+  * BERT, RobERTa, DistilBERT (base & fine-tuned)
+
+#### Data Visualisation
+
+Available at [edin-vis.streamlit.app](https://edin-vis.streamlit.app/)
+
+## General Features
+
+Since my main goal here is learning and gaining experience, I have tried to stick to the below principles:
+
+- **Modular Architecture**: Clean separation between different ML domains with reusable pipeline components
+- **Production-Ready Code**: Well-structured, documented, and maintainable implementations
+- **Comprehensive Evaluation**: Multiple metrics, visualisations, and comparative analysis
+- **Configuration-Driven**: Easy experimentation through YAML configuration files
+- **Extensible Design**: Framework supports adding new models and project types
+- **Modern Libraries**: Uses well-known python packages such as `wandb`,`mlflow`, `pytorch`,`lightning`, `transformers`, `huggingface-hub`, `accelerate`,`unsloth`, `dspy`, `langchain`, `weaviate`
+
+## Project Structure [ongoing]
 
 ```text
 AI-Portfolio/
@@ -53,19 +65,36 @@ AI-Portfolio/
 │   │   └── metrics/         # Performance metrics
 │   ├── main.py              # Entry point
 │   └── requirements.txt     # Dependencies
-├── NLP/                     # Natural Language Processing (PLANNED)
-├── MachineLearning/         # Traditional ML tasks (PLANNED)
-└── DataVisualisation/       # Data visualisation projects (PLANNED)
+├── NLP/                     # Natural Language Processing tasks
+│   ├── configs/
+│   │   └── config.yaml      # Model and pipeline configuration
+│   ├── data/
+│   │   ├── books/   
+│   │   ├── dvd/
+│   │   ├── electronics/
+│   │   └── kitchen_&_housewares/   
+│   ├── models/              # Model implementations
+│   │   ├── Deep/            # FFNN, CNN, RNN, Transformers
+│   │   ├── LMs/             # BERT, RoBERTa, DistilBERT
+│   │   └── ml/              # Logistic Regression, Naive Bayes
+│   ├── src/                 # Core pipeline code
+│   │   ├── data_loader.py   # Data loading and preprocessing
+│   │   ├── pipeline.py      # Main pipeline orchestration
+│   │   ├── evaluate.py      # Evaluation and metrics
+│   │   └── utils.py         # Utility functions
+│   ├── results/             # Output storage
+│   │   ├── models/          # Saved models
+│   │   ├── figures/         # Visualisations
+│   │   └── metrics/         # Performance metrics
+└── MachineLearning/         # Traditional ML tasks (PLANNED)
 ```
 
 ## Setup
 
-### Time Series Forecasting
-
-1. **Navigate to the TimeSeries directory:**
+1. **Navigate to the desired directory (TimeSeries, NLP/Classification):**
 
 ```bash
-cd TimeSeries
+cd DIRECTORY
 ```
 
 1. **Install dependencies:**
@@ -80,9 +109,7 @@ uv pip install -r requirements.txt
 
 ## Usage
 
-### Running Time Series Forecasting
-
-Run the pipeline with default settings (XGBoost and Prophet):
+Run the pipeline for each sub-project with default settings:
 
 ```bash
 python main.py
@@ -90,7 +117,7 @@ python main.py
 
 ### Configuration
 
-Edit `TimeSeries/configs/config.yaml` to customise:
+Edit `**/configs/config.yaml` in each sub-project. E.g. for the Time Series project you can customise:
 
 - **Data Settings**: File paths, timestamp column, target variables
 - **Model Parameters**: Hyperparameters for XGBoost and Prophet
@@ -110,7 +137,7 @@ models:
 
 ### Experiment Configuration
 
-Define experiments in `TimeSeries/main.py`:
+Define experiments in `**/main.py` e.g.:
 
 ```python
 EXPERIMENTS = [
@@ -127,9 +154,9 @@ EXPERIMENTS = [
 
 After running the pipeline, results are saved to:
 
-- **Models**: `TimeSeries/results/models/`
-- **Metrics**: `TimeSeries/results/metrics/results_summary.json`
-- **Figures**: `TimeSeries/results/figures/`
+- **Models**: `**/results/models/`
+- **Metrics**: `**/results/metrics/results_summary.json`
+- **Figures**: `**/results/figures/`
 
 ## Latest Results
 
@@ -159,12 +186,17 @@ Detailed performance metrics for 1-step ahead forecasting.
 
 Visual comparison of actual vs predicted values on the test set across all forecast horizons.
 
-## Future Work
+## Pending⏱️
 
-### Time Series
+#### Time Series
 
 - Additional statistical models: ARIMA, ETS, Theta
 - Machine learning models: LightGBM, Random Forest, Gradient Boosting
-- Deep learning models: LSTM, GRU, N-BEATS, Transformer, TCN
+- Deep learning models: xLSTM, GRU, N-BEATS, Transformer, TCN
 - Advanced ensemble methods
 - Hyperparameter optimisation
+
+#### NLP
+
+- Multi-modal agentic VQA with open-source VLMs
+- More open source [thinking] models for classification (nemotron, mistral, qwen, etc. for zero-shot, few-shot, and chain-of-thought prompting)
