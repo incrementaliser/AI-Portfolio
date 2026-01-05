@@ -101,14 +101,14 @@ DATA_CONFIG = {
 
 EXPERIMENTS: List[Dict] = [
     # Logistic Regression experiment
-    {
-        "model": "logistic_regression",
-    },
+    # {
+    #     "model": "logistic_regression",
+    # },
     
     # Naive Bayes Multinomial experiment
-    {
-        "model": "naive_bayes_multinomial",
-    },
+    # {
+    #     "model": "naive_bayes_multinomial",
+    # },
     
     # =========================================================
     # LANGUAGE MODEL EXPERIMENTS (uncomment to run)
@@ -124,9 +124,9 @@ EXPERIMENTS: List[Dict] = [
     # },
     
     # BERT experiment
-    # {
-    #     "model": "bert_base",
-    # },
+    {
+        "model": "bert_base",
+    },
     
     # RoBERTa experiment
     # {

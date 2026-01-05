@@ -20,6 +20,7 @@ models:
       fp16: true
       early_stopping_patience: 2
       random_state: 42
+      fine_tune: false  # Set to true to enable fine-tuning on your dataset
     
     # DistilBERT - Distilled BERT model (recommended for faster training)
     # ~66M parameters, 60% faster than BERT, 97% of BERT's performance
@@ -34,6 +35,7 @@ models:
       fp16: true
       early_stopping_patience: 2
       random_state: 42
+      fine_tune: false  # Set to true to enable fine-tuning on your dataset
     
     # RoBERTa Base - Robustly Optimized BERT
     # ~125M parameters, often better than BERT on many tasks
@@ -48,6 +50,7 @@ models:
       fp16: true
       early_stopping_patience: 2
       random_state: 42
+      fine_tune: false  # Set to true to enable fine-tuning on your dataset
 
 # Training Configuration
 training:

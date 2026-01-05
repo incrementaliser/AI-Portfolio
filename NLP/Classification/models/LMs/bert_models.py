@@ -11,7 +11,8 @@ class BERTClassifier(BaseLMModel):
     """
     BERT-based classifier for sentiment analysis.
     
-    Uses bert-base-uncased by default, with fine-tuning for classification.
+    Uses bert-base-uncased by default. Fine-tuning is disabled by default (fine_tune=False).
+    Set fine_tune=True to enable training on your dataset for better performance.
     Suitable for general-purpose text classification tasks.
     """
     
@@ -73,6 +74,8 @@ class DistilBERTClassifier(BaseLMModel):
     Uses distilbert-base-uncased by default. DistilBERT is a smaller, faster
     version of BERT that retains ~97% of BERT's performance while being
     60% faster and 40% smaller. Recommended for resource-constrained settings.
+    
+    Fine-tuning is disabled by default (fine_tune=False). Set fine_tune=True to enable training.
     """
     
     def __init__(
@@ -132,6 +135,8 @@ class RoBERTaClassifier(BaseLMModel):
     
     Uses roberta-base by default. RoBERTa is an optimized version of BERT
     with improved pre-training procedure, often achieving better results.
+    
+    Fine-tuning is disabled by default (fine_tune=False). Set fine_tune=True to enable training.
     """
     
     def __init__(

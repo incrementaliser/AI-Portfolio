@@ -153,9 +153,14 @@ class NLPClassificationPipeline:
         if is_prompting:
             print("  Setting up prompting model...")
         else:
-            print("  Training transformer model (this may take a while)...")
+            # Check if fine-tuning is enabled
+            fine_tune = getattr(model, 'fine_tune', False)
+            if fine_tune:
+                print("  Fine-tuning transformer model (this may take a while)...")
+            else:
+                print("  Loading pre-trained transformer model (fine-tuning disabled)...")
         
-        # Train the model with validation data
+        # Train the model with validation data (or just load if fine_tune=False)
         model.fit(train_texts, y_train, val_texts, y_val)
         
         # Get predictions

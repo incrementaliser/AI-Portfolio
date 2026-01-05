@@ -45,6 +45,7 @@ class BaseLMModel(BaseNLPModel):
         fp16: bool = True,
         early_stopping_patience: int = 2,
         random_state: int = 42,
+        fine_tune: bool = False,
         **kwargs
     ):
         """
@@ -56,12 +57,14 @@ class BaseLMModel(BaseNLPModel):
             max_length: Maximum sequence length for tokenization
             batch_size: Training and inference batch size
             learning_rate: Learning rate for AdamW optimizer
-            epochs: Number of training epochs
+            epochs: Number of training epochs (only used if fine_tune=True)
             warmup_ratio: Fraction of training steps for learning rate warmup
             weight_decay: Weight decay for regularization
             fp16: Whether to use mixed precision training (requires GPU)
             early_stopping_patience: Number of epochs to wait before early stopping
             random_state: Random seed for reproducibility
+            fine_tune: Whether to fine-tune the model on training data (default: False)
+                       If False, uses pre-trained model without training
             **kwargs: Additional keyword arguments
         """
         super().__init__(model_type="lm")
@@ -77,6 +80,7 @@ class BaseLMModel(BaseNLPModel):
         self.fp16 = fp16
         self.early_stopping_patience = early_stopping_patience
         self.random_state = random_state
+        self.fine_tune = fine_tune
         
         # Set random seeds
         torch.manual_seed(random_state)
@@ -175,17 +179,33 @@ class BaseLMModel(BaseNLPModel):
         y_val: Optional[np.ndarray] = None
     ) -> None:
         """
-        Train the model on the given data.
+        Load and optionally fine-tune the model on the given data.
         
         Args:
             X: Training texts (list of strings or DataFrame with 'review' column)
             y: Training labels
             X_val: Optional validation texts
             y_val: Optional validation labels
+            
+        Note:
+            If fine_tune=False (default), only loads the pre-trained model without training.
+            The classification head will be randomly initialized and predictions may be poor.
+            Set fine_tune=True to enable fine-tuning on your dataset.
         """
         # Load model if not already loaded
         if self.model is None:
             self._load_model()
+        
+        # Skip training if fine_tune is False
+        if not self.fine_tune:
+            print("  Using pre-trained model without fine-tuning (fine_tune=False)")
+            print("  Note: Classification head is randomly initialized. Enable fine_tune=True for better performance.")
+            self._is_trained = True
+            return
+        
+        
+        # Fine-tuning mode: train the model
+        print("  Fine-tuning model on training data...")
         
         # Extract texts if X is a DataFrame
         if hasattr(X, 'tolist'):
@@ -236,7 +256,7 @@ class BaseLMModel(BaseNLPModel):
         best_val_loss = float('inf')
         patience_counter = 0
         
-        print(f"\n  Training for {self.epochs} epochs...")
+        print(f"\n  Fine-tuning for {self.epochs} epochs...")
         print(f"  Total steps: {total_steps}, Warmup steps: {warmup_steps}")
         
         for epoch in range(self.epochs):
@@ -314,7 +334,7 @@ class BaseLMModel(BaseNLPModel):
                         break
         
         self._is_trained = True
-        print("  Training completed!")
+        print("  Fine-tuning completed!")
     
     def _validate(self, val_loader: DataLoader) -> float:
         """
@@ -355,7 +375,7 @@ class BaseLMModel(BaseNLPModel):
             Array of predicted labels
         """
         if self.model is None:
-            raise ValueError("Model not trained. Call fit() first.")
+            raise ValueError("Model not loaded. Call fit() first.")
         
         # Handle sparse matrices (from TF-IDF) - this shouldn't happen for LM models
         # but we handle it gracefully
@@ -405,7 +425,7 @@ class BaseLMModel(BaseNLPModel):
             Array of class probabilities with shape (n_samples, n_classes)
         """
         if self.model is None:
-            raise ValueError("Model not trained. Call fit() first.")
+            raise ValueError("Model not loaded. Call fit() first.")
         
         # Handle sparse matrices
         if hasattr(X, 'toarray'):
@@ -463,6 +483,7 @@ class BaseLMModel(BaseNLPModel):
             'fp16': self.fp16,
             'early_stopping_patience': self.early_stopping_patience,
             'random_state': self.random_state,
+            'fine_tune': self.fine_tune,
             'device': str(self.device)
         }
     

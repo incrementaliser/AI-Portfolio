@@ -4,6 +4,7 @@ Utility functions for NLP classification pipeline
 import os
 import json
 import yaml
+import numpy as np
 
 
 def load_config(config_path: str = 'configs/config.yaml') -> dict:
@@ -48,9 +49,7 @@ def save_results(results: dict, path: str, append: bool = False) -> None:
         results: Dictionary of model results
         path: Directory path to save results (can be relative or absolute)
         append: If True, append to existing results instead of overwriting
-    """
-    import numpy as np
-    
+    """    
     # Ensure path is absolute
     if not os.path.isabs(path):
         path = os.path.abspath(path)
