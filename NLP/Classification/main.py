@@ -36,7 +36,8 @@ SCRIPT_DIR = Path(__file__).parent.absolute()
 # Paths are relative to the script directory
 # Use forward slashes for glob patterns (works on Windows too)
 DATA_CONFIG = {
-    "data_path": str(SCRIPT_DIR / "data").replace('\\', '/') + '/**/',
+    # Only load books category - change to "data/**/" to load all categories
+    "data_path": str(SCRIPT_DIR / "data" / "books").replace('\\', '/') + '/',
 }
 
 
@@ -472,6 +473,10 @@ def load_configs_for_experiment(experiment: Dict) -> Dict:
             # Merge training config if present
             if 'training' in lm_config:
                 config['training'] = lm_config['training']
+            
+            # Merge inference config if present
+            if 'inference' in lm_config:
+                config['inference'] = lm_config['inference']
         else:
             print(f"Warning: LM config not found at {lm_config_path}")
             print("  LM models may not work correctly without this config.")

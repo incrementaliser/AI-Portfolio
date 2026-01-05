@@ -356,6 +356,11 @@ class NLPModelFactory:
             display_name, model_class = NLPModelFactory.LM_MODEL_MAPPING[model_key]
             params = config.get('models', {}).get('lm', {}).get(model_key, {}).copy()
             params['random_state'] = params.get('random_state', RANDOM_SEED)
+            # Merge inference config if available
+            if 'inference' in config:
+                inference_config = config['inference']
+                if 'batch_size' in inference_config:
+                    params['inference_batch_size'] = inference_config['batch_size']
             return model_class(**params)
         
         # Check Accelerate models

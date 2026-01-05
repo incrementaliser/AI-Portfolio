@@ -12,7 +12,7 @@ models:
     bert_base:
       model_name: "bert-base-uncased"
       max_length: 256
-      batch_size: 16
+      batch_size: 16  # Training batch size
       learning_rate: 2.0e-5
       epochs: 3
       warmup_ratio: 0.1
@@ -69,10 +69,12 @@ training:
 
 # Inference Configuration
 inference:
-  # Batch size for inference (can be larger than training)
-  batch_size: 64
+  # Batch size for inference (can be larger than training for faster inference)
+  # Larger batches = faster inference but more memory usage
+  # Recommended: 64-128 for GPU, 32-64 for CPU
+  batch_size: 128
   
-  # Whether to use FP16 for inference
+  # Whether to use FP16 for inference (faster, requires GPU)
   fp16: true
 
 # Model Comparison Notes:
