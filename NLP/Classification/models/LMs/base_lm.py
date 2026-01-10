@@ -72,9 +72,7 @@ class BaseLMModel(BaseNLPModel):
         self.model_name = model_name
         self.num_labels = num_labels
         self.max_length = max_length
-        self.batch_size = batch_size  # Training batch size
-        # Inference batch size (can be larger than training batch size)
-        self.inference_batch_size = kwargs.get('inference_batch_size', batch_size * 4)
+        self.batch_size = batch_size
         self.learning_rate = learning_rate
         self.epochs = epochs
         self.warmup_ratio = warmup_ratio
@@ -110,19 +108,9 @@ class BaseLMModel(BaseNLPModel):
         )
         self.model.to(self.device)
         
-        # Enable gradient checkpointing for memory efficiency (only during training)
+        # Enable gradient checkpointing for memory efficiency
         if hasattr(self.model, 'gradient_checkpointing_enable'):
             self.model.gradient_checkpointing_enable()
-        
-        # Optimize model for inference using torch.compile (PyTorch 2.0+)
-        # This can provide 20-30% speedup on compatible hardware
-        try:
-            if hasattr(torch, 'compile') and self.device.type == "cuda":
-                print("  Compiling model for faster inference...")
-                self.model = torch.compile(self.model, mode="reduce-overhead")
-        except Exception as e:
-            # torch.compile not available or failed, continue without it
-            pass
     
     def _tokenize_texts(
         self,
@@ -153,8 +141,7 @@ class BaseLMModel(BaseNLPModel):
         self,
         texts: List[str],
         labels: Optional[np.ndarray] = None,
-        shuffle: bool = False,
-        use_inference_batch_size: bool = False
+        shuffle: bool = False
     ) -> DataLoader:
         """
         Create a DataLoader from texts and optional labels.
@@ -163,7 +150,6 @@ class BaseLMModel(BaseNLPModel):
             texts: List of input texts
             labels: Optional array of labels
             shuffle: Whether to shuffle the data
-            use_inference_batch_size: If True, use inference batch size (larger, faster)
             
         Returns:
             PyTorch DataLoader
@@ -177,11 +163,9 @@ class BaseLMModel(BaseNLPModel):
             max_length=self.max_length
         )
         
-        batch_size = self.inference_batch_size if use_inference_batch_size else self.batch_size
-        
         return DataLoader(
             dataset,
-            batch_size=batch_size,
+            batch_size=self.batch_size,
             shuffle=shuffle,
             num_workers=0,  # Avoid multiprocessing issues on Windows
             pin_memory=True if self.device.type == "cuda" else False
@@ -409,25 +393,14 @@ class BaseLMModel(BaseNLPModel):
         else:
             texts = list(X)
         
-        # Create dataloader for inference (use larger batch size for faster inference)
-        dataloader = self._create_dataloader(texts, labels=None, shuffle=False, use_inference_batch_size=True)
+        # Create dataloader for inference
+        dataloader = self._create_dataloader(texts, labels=None, shuffle=False)
         
         self.model.eval()
         all_predictions = []
         
-        total_samples = len(texts)
-        total_batches = len(dataloader)
-        
         with torch.no_grad():
-            progress_bar = tqdm(
-                dataloader,
-                desc="  Predicting",
-                total=total_batches,
-                unit="batch",
-                leave=True
-            )
-            
-            for batch_idx, batch in enumerate(progress_bar):
+            for batch in dataloader:
                 input_ids = batch['input_ids'].to(self.device)
                 attention_mask = batch['attention_mask'].to(self.device)
                 
@@ -438,12 +411,6 @@ class BaseLMModel(BaseNLPModel):
                 
                 predictions = torch.argmax(outputs.logits, dim=-1)
                 all_predictions.extend(predictions.cpu().numpy())
-                
-                # Update progress bar with sample count
-                samples_processed = min((batch_idx + 1) * self.inference_batch_size, total_samples)
-                progress_bar.set_postfix({
-                    'samples': f'{samples_processed}/{total_samples}'
-                })
         
         return np.array(all_predictions)
     
@@ -475,25 +442,14 @@ class BaseLMModel(BaseNLPModel):
         else:
             texts = list(X)
         
-        # Create dataloader for inference (use larger batch size for faster inference)
-        dataloader = self._create_dataloader(texts, labels=None, shuffle=False, use_inference_batch_size=True)
+        # Create dataloader for inference
+        dataloader = self._create_dataloader(texts, labels=None, shuffle=False)
         
         self.model.eval()
         all_probabilities = []
         
-        total_samples = len(texts)
-        total_batches = len(dataloader)
-        
         with torch.no_grad():
-            progress_bar = tqdm(
-                dataloader,
-                desc="  Predicting probabilities",
-                total=total_batches,
-                unit="batch",
-                leave=True
-            )
-            
-            for batch_idx, batch in enumerate(progress_bar):
+            for batch in dataloader:
                 input_ids = batch['input_ids'].to(self.device)
                 attention_mask = batch['attention_mask'].to(self.device)
                 
@@ -505,12 +461,6 @@ class BaseLMModel(BaseNLPModel):
                 # Apply softmax to get probabilities
                 probabilities = torch.nn.functional.softmax(outputs.logits, dim=-1)
                 all_probabilities.extend(probabilities.cpu().numpy())
-                
-                # Update progress bar with sample count
-                samples_processed = min((batch_idx + 1) * self.inference_batch_size, total_samples)
-                progress_bar.set_postfix({
-                    'samples': f'{samples_processed}/{total_samples}'
-                })
         
         return np.array(all_probabilities)
     
@@ -534,7 +484,6 @@ class BaseLMModel(BaseNLPModel):
             'early_stopping_patience': self.early_stopping_patience,
             'random_state': self.random_state,
             'fine_tune': self.fine_tune,
-            'inference_batch_size': self.inference_batch_size,
             'device': str(self.device)
         }
     
